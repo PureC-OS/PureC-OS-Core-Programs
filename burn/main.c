@@ -1,4 +1,4 @@
-#include "../../libc/include/purec.h"
+#include "libc/include/purec.h"
 void _start(void){
     struct cpu_monitor_info info;
     uint64_t start=0;

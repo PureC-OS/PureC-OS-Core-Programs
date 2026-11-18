@@ -9,7 +9,7 @@ QSTR_DEFS = qstrdefsport.h
 
 MICROPY_ROM_TEXT_COMPRESSION = 0
 
-include $(ROOT_DIR)/src/programs/micropython/py/mkenv.mk
+include $(CURDIR)/py/mkenv.mk
 include $(TOP)/py/py.mk
 
 INC += -I.

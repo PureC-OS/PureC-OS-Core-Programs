@@ -1,5 +1,5 @@
 #include "path.h"
-#include "../../libc/include/purec.h"
+#include "libc/include/purec.h"
 
 static bool append_component(char *output, uint32_t *length,
                              uint32_t capacity, const char *component,

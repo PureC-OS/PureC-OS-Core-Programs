@@ -1,4 +1,4 @@
-#include "../../libc/include/purec.h"
+#include "libc/include/purec.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netdb.h>

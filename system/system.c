@@ -1,5 +1,5 @@
 #include "system.h"
-#include "../../libc/include/purec.h"
+#include "libc/include/purec.h"
 
 #define SYSTEM_DEVICE_CAPACITY 20
 

@@ -1,4 +1,4 @@
-#include "../../libc/include/purec.h"
+#include "libc/include/purec.h"
 
 static uint32_t core_usage_percent(uint64_t total_a, uint64_t idle_a,
                                    uint64_t total_b, uint64_t idle_b){

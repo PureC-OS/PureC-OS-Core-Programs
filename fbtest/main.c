@@ -1,4 +1,4 @@
-#include "../../libc/include/purec.h"
+#include "libc/include/purec.h"
 #include <poll.h>
 #include <stdio.h>
 #include <string.h>

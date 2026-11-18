@@ -6,8 +6,8 @@
 //
 // Build: like any native program (own _start). Run: /bin/program/fputest
 
-#include "../../libc/include/purec.h"
-#include "../../libc/include/hosted/stdlib.h"
+#include "libc/include/purec.h"
+#include "libc/include/hosted/stdlib.h"
 
 static int failures = 0;
 

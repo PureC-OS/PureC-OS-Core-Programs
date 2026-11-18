@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../libc/include/purec.h"
+#include "libc/include/purec.h"
 #include <stdbool.h>
 #include <stdint.h>
 

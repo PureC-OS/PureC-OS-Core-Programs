@@ -1,7 +1,7 @@
 #include "commands.h"
 #include "filesystem.h"
 #include "system.h"
-#include "../../libc/include/purec.h"
+#include "libc/include/purec.h"
 
 int system_command_run(const char *name, const char *arguments){
     int status=system_filesystem_command(name,arguments);

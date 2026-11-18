@@ -1,4 +1,4 @@
-#include "../../libc/include/purec.h"
+#include "libc/include/purec.h"
 
 int battery_main(void){
     struct battery_info info = {0};

@@ -1,4 +1,4 @@
-#include "../../libc/include/purec.h"
+#include "libc/include/purec.h"
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>

@@ -1,6 +1,8 @@
 .DEFAULT_GOAL := all
+SRC_DIR := $(CURDIR)
 ROOT_DIR ?= $(abspath ../..)
 include $(ROOT_DIR)/mk/toolchain.mk
+CPPFLAGS += -I$(ROOT_DIR)/src
 
 OBJ_DIR := $(BIN_DIR)/obj/programs
 PROGRAM_DIR := $(BIN_DIR)/programs
@@ -142,9 +144,22 @@ PORT_TARGETS += $(PROGRAM_DIR)/vim
 -include $(VIM_OBJECTS:.o=.d)
 endif
 
+VERSION := $(shell cat $(SRC_DIR)/VERSION)
+PKGREL ?= 1
+REPO_DIR ?= $(BIN_DIR)/core-repo
+SIGN_KEY ?= $(HOME)/.config/purec-pkg/signing.pem
+PKG_DIR := $(ROOT_DIR)/programs/purec-os-pkg
+
 .NOTPARALLEL:
-.PHONY: all ports
+.PHONY: all ports packages
 all: $(TARGETS)
+
+packages: all
+	@if test -f $(PKG_DIR)/Makefile; then $(MAKE) -C $(PKG_DIR) package; fi
+	python3 $(SRC_DIR)/mkpackages.py --root $(ROOT_DIR) --programs $(PROGRAM_DIR) --conf $(SRC_DIR)/packages.conf \
+		--version $(VERSION) --pkgrel $(PKGREL) --out $(REPO_DIR) --sign-key $(SIGN_KEY)
+	@if test -d $(BIN_DIR)/repo; then cp $(BIN_DIR)/repo/pkg-*.pkg.tar.gz* $(REPO_DIR)/ 2>/dev/null || true; fi
+	@ls $(REPO_DIR)
 
 ports: $(PORT_TARGETS)
 
@@ -152,7 +167,7 @@ ports: $(PORT_TARGETS)
 
 $(GENERAL_OBJECTS): PRIVATE_CFLAGS :=
 $(GENERAL_CPP_OBJECTS): PRIVATE_CXXFLAGS := -std=c++20 -fno-exceptions -fno-rtti
-$(LUA_OBJECTS): PRIVATE_CFLAGS := -DLUA_ANSI -I$(ROOT_DIR)/src/libc/include/hosted -include $(ROOT_DIR)/src/programs/lua/purec_lua_readline.h
+$(LUA_OBJECTS): PRIVATE_CFLAGS := -DLUA_ANSI -I$(ROOT_DIR)/src/libc/include/hosted -include $(SRC_DIR)/lua/purec_lua_readline.h
 
 $(LIBPUREC):
 	$(MAKE) -C $(ROOT_DIR)/src/libc
@@ -169,13 +184,13 @@ $(PROGRAM_DIR)/echo-dyn: $(OBJ_DIR)/echo/echo-pic.o $(LIB_DIR)/libpurec.so $(DYN
 	@mkdir -p $(@D)
 	$(LD) $(DYN_LINK_FLAGS) -o $@ $(OBJ_DIR)/echo/echo-pic.o $(DYN_LD_STUB) $(LIB_DIR)/libpurec.so
 
-$(OBJ_DIR)/echo/echo-pic.o: $(ROOT_DIR)/src/programs/utils/test/echo_dyn/echo.c
+$(OBJ_DIR)/echo/echo-pic.o: $(SRC_DIR)/utils/test/echo_dyn/echo.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(USER_SO_CFLAGS) -c $< -o $@
 
 TARGETS += $(PROGRAM_DIR)/dltest-dyn $(LIB_DIR)/libdltest.so $(LIB_DIR)/libdltest2.so
 
-$(OBJ_DIR)/dltest/%-pic.o: $(ROOT_DIR)/src/programs/dltest/%.c
+$(OBJ_DIR)/dltest/%-pic.o: $(SRC_DIR)/dltest/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_SO_CFLAGS) -c $< -o $@
 
@@ -198,7 +213,7 @@ endif
 
 -include $(UTIL_OBJECTS:.o=.d)
 
-$(UTIL_OBJECTS): $(OBJ_DIR)/utils/%.o: $(ROOT_DIR)/src/programs/utils/%.c
+$(UTIL_OBJECTS): $(OBJ_DIR)/utils/%.o: $(SRC_DIR)/utils/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
@@ -221,11 +236,11 @@ $(LIBPURECRYPT):
 	@mkdir -p $(LIB_DIR)
 	cp $(CRYPT_DIR)/build/libpurecrypt.a $@
 
-$(OBJ_DIR)/%.o: $(ROOT_DIR)/src/programs/%.c
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(CRYPT_DIR)/include  $(DEPFLAGS) $(USER_CFLAGS) $(PRIVATE_CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/%.o: $(ROOT_DIR)/src/programs/%.cpp
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(@D)
 	$(CXX) $(CPPFLAGS)  $(DEPFLAGS) $(USER_CFLAGS) $(PRIVATE_CXXFLAGS) -c $< -o $@
 
@@ -325,7 +340,7 @@ $(TCCRT_LIB): $(TCCRT_OBJECTS)
 	$(AR) rcs $@ $^
 endif
 
-$(OBJ_DIR)/utils/test/hello/main.o: $(ROOT_DIR)/src/programs/utils/test/hello/main.c
+$(OBJ_DIR)/utils/test/hello/main.o: $(SRC_DIR)/utils/test/hello/main.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
@@ -333,7 +348,7 @@ $(PROGRAM_DIR)/hello: $(OBJ_DIR)/utils/test/hello/main.o $(LIB_DIR)/crt0.o $(LIB
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(LIB_DIR)/crt0.o $(OBJ_DIR)/utils/test/hello/main.o $(LIBPUREFS) $(LIBPUREC)
 
-$(OBJ_DIR)/forktest/main.o: $(ROOT_DIR)/src/programs/forktest/main.c
+$(OBJ_DIR)/forktest/main.o: $(SRC_DIR)/forktest/main.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
@@ -341,11 +356,11 @@ $(PROGRAM_DIR)/forktest: $(OBJ_DIR)/forktest/main.o $(LIB_DIR)/crt0.o $(LIBPUREF
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(LIB_DIR)/crt0.o $(OBJ_DIR)/forktest/main.o $(LIBPUREFS) $(LIBPUREC)
 
-$(OBJ_DIR)/init/main.o $(OBJ_DIR)/initctl/main.o $(OBJ_DIR)/installer/main.o $(OBJ_DIR)/getty/main.o: $(OBJ_DIR)/%/main.o: $(ROOT_DIR)/src/programs/%/main.c
+$(OBJ_DIR)/init/main.o $(OBJ_DIR)/initctl/main.o $(OBJ_DIR)/installer/main.o $(OBJ_DIR)/getty/main.o: $(OBJ_DIR)/%/main.o: $(SRC_DIR)/%/main.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/sh/main.o: $(ROOT_DIR)/src/programs/sh/main.c
+$(OBJ_DIR)/sh/main.o: $(SRC_DIR)/sh/main.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
@@ -353,7 +368,7 @@ $(PROGRAM_DIR)/sh: $(OBJ_DIR)/sh/main.o $(LIB_DIR)/crt0.o $(LIBPUREFS) $(LIBPURE
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(LIB_DIR)/crt0.o $(OBJ_DIR)/sh/main.o $(LIBPUREFS) $(LIBPUREC)
 
-$(OBJ_DIR)/journalctl/main.o: $(ROOT_DIR)/src/programs/journalctl/main.c
+$(OBJ_DIR)/journalctl/main.o: $(SRC_DIR)/journalctl/main.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
@@ -361,7 +376,7 @@ $(PROGRAM_DIR)/journalctl: $(OBJ_DIR)/journalctl/main.o $(LIB_DIR)/crt0.o $(LIBP
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(LIB_DIR)/crt0.o $(OBJ_DIR)/journalctl/main.o $(LIBPUREFS) $(LIBPUREC)
 
-$(OBJ_DIR)/utils/test/httpget/main.o: $(ROOT_DIR)/src/programs/utils/test/httpget/main.c
+$(OBJ_DIR)/utils/test/httpget/main.o: $(SRC_DIR)/utils/test/httpget/main.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
@@ -374,7 +389,7 @@ LIBWOLF := $(LIB_DIR)/libwolf.a
 $(LIBWOLF):
 	$(MAKE) -C $(ROOT_DIR)/wolfssl lib
 
-$(OBJ_DIR)/utils/test/httpsget/main.o: $(ROOT_DIR)/src/programs/utils/test/httpsget/main.c $(LIBWOLF)
+$(OBJ_DIR)/utils/test/httpsget/main.o: $(SRC_DIR)/utils/test/httpsget/main.c $(LIBWOLF)
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted -I$(ROOT_DIR)/wolfssl -I$(ROOT_DIR)/wolfssl/purec -DWOLFSSL_USER_SETTINGS -DWOLF_PUREC_TLS $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
@@ -424,7 +439,7 @@ $(PROGRAM_DIR)/curl: $(CURL_OBJECTS) $(LIB_DIR)/crt0.o $(LIBWOLF) $(CURL_ZLIB) $
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(LIB_DIR)/crt0.o $(CURL_OBJECTS) $(LIBWOLF) $(CURL_ZLIB) $(LIBPUREFS) $(LIBPUREC) $(LIBGCC)
 endif
 
-$(OBJ_DIR)/proctest/main.o: $(ROOT_DIR)/src/programs/proctest/main.c
+$(OBJ_DIR)/proctest/main.o: $(SRC_DIR)/proctest/main.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
@@ -432,7 +447,7 @@ $(PROGRAM_DIR)/proctest: $(OBJ_DIR)/proctest/main.o $(LIB_DIR)/crt0.o $(LIBPUREF
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(LIB_DIR)/crt0.o $(OBJ_DIR)/proctest/main.o $(LIBPUREFS) $(LIBPUREC)
 
-$(OBJ_DIR)/thrtest/main.o: $(ROOT_DIR)/src/programs/thrtest/main.c
+$(OBJ_DIR)/thrtest/main.o: $(SRC_DIR)/thrtest/main.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
@@ -440,7 +455,7 @@ $(PROGRAM_DIR)/thrtest: $(OBJ_DIR)/thrtest/main.o $(LIB_DIR)/crt0.o $(LIBPUREFS)
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(LIB_DIR)/crt0.o $(OBJ_DIR)/thrtest/main.o $(LIBPUREFS) $(LIBPUREC)
 
-$(OBJ_DIR)/resolved/main.o: $(ROOT_DIR)/src/programs/resolved/main.c
+$(OBJ_DIR)/resolved/main.o: $(SRC_DIR)/resolved/main.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
@@ -448,7 +463,7 @@ $(PROGRAM_DIR)/resolved: $(OBJ_DIR)/resolved/main.o $(LIB_DIR)/crt0.o $(LIBPUREF
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(LIB_DIR)/crt0.o $(OBJ_DIR)/resolved/main.o $(LIBPUREFS) $(LIBPUREC)
 
-$(OBJ_DIR)/ntpd/main.o: $(ROOT_DIR)/src/programs/ntpd/main.c
+$(OBJ_DIR)/ntpd/main.o: $(SRC_DIR)/ntpd/main.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
@@ -456,7 +471,7 @@ $(PROGRAM_DIR)/ntpd: $(OBJ_DIR)/ntpd/main.o $(LIB_DIR)/crt0.o $(LIBPUREFS) $(LIB
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(LIB_DIR)/crt0.o $(OBJ_DIR)/ntpd/main.o $(LIBPUREFS) $(LIBPUREC)
 
-$(OBJ_DIR)/netd/main.o: $(ROOT_DIR)/src/programs/netd/main.c
+$(OBJ_DIR)/netd/main.o: $(SRC_DIR)/netd/main.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
@@ -464,7 +479,7 @@ $(PROGRAM_DIR)/netd: $(OBJ_DIR)/netd/main.o $(LIB_DIR)/crt0.o $(LIBPUREFS) $(LIB
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(LIB_DIR)/crt0.o $(OBJ_DIR)/netd/main.o $(LIBPUREFS) $(LIBPUREC)
 
-$(OBJ_DIR)/dhcpc/main.o: $(ROOT_DIR)/src/programs/dhcpc/main.c
+$(OBJ_DIR)/dhcpc/main.o: $(SRC_DIR)/dhcpc/main.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
@@ -472,7 +487,7 @@ $(PROGRAM_DIR)/dhcpc: $(OBJ_DIR)/dhcpc/main.o $(LIB_DIR)/crt0.o $(LIBPUREFS) $(L
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(LIB_DIR)/crt0.o $(OBJ_DIR)/dhcpc/main.o $(LIBPUREFS) $(LIBPUREC)
 
-$(OBJ_DIR)/udptest/main.o: $(ROOT_DIR)/src/programs/udptest/main.c
+$(OBJ_DIR)/udptest/main.o: $(SRC_DIR)/udptest/main.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
@@ -480,7 +495,7 @@ $(PROGRAM_DIR)/udptest: $(OBJ_DIR)/udptest/main.o $(LIB_DIR)/crt0.o $(LIBPUREFS)
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(LIB_DIR)/crt0.o $(OBJ_DIR)/udptest/main.o $(LIBPUREFS) $(LIBPUREC)
 
-$(OBJ_DIR)/fbtest/main.o: $(ROOT_DIR)/src/programs/fbtest/main.c
+$(OBJ_DIR)/fbtest/main.o: $(SRC_DIR)/fbtest/main.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
@@ -488,7 +503,7 @@ $(PROGRAM_DIR)/fbtest: $(OBJ_DIR)/fbtest/main.o $(LIB_DIR)/crt0.o $(LIBPUREFS) $
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(LIB_DIR)/crt0.o $(OBJ_DIR)/fbtest/main.o $(LIBPUREFS) $(LIBPUREC)
 
-$(OBJ_DIR)/posixtest/main.o: $(ROOT_DIR)/src/programs/posixtest/main.c
+$(OBJ_DIR)/posixtest/main.o: $(SRC_DIR)/posixtest/main.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
@@ -496,7 +511,7 @@ $(PROGRAM_DIR)/posixtest: $(OBJ_DIR)/posixtest/main.o $(LIB_DIR)/crt0.o $(LIBPUR
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(LIB_DIR)/crt0.o $(OBJ_DIR)/posixtest/main.o $(LIBPUREFS) $(LIBPUREC)
 
-$(OBJ_DIR)/memhog/main.o: $(ROOT_DIR)/src/programs/memhog/main.c
+$(OBJ_DIR)/memhog/main.o: $(SRC_DIR)/memhog/main.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
@@ -504,7 +519,7 @@ $(PROGRAM_DIR)/memhog: $(OBJ_DIR)/memhog/main.o $(LIB_DIR)/crt0.o $(LIBPUREFS) $
 	@mkdir -p $(@D)
 	$(LD) -T $(LINKER_SCRIPT) -o $@ $(LIB_DIR)/crt0.o $(OBJ_DIR)/memhog/main.o $(LIBPUREFS) $(LIBPUREC)
 
-$(OBJ_DIR)/memtest/main.o: $(ROOT_DIR)/src/programs/memtest/main.c
+$(OBJ_DIR)/memtest/main.o: $(SRC_DIR)/memtest/main.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(ROOT_DIR)/src/libc/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 

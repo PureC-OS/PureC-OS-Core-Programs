@@ -1,5 +1,5 @@
 #include "commands.h"
-#include "../../libc/include/purec.h"
+#include "libc/include/purec.h"
 
 #define SYSTEM_ARGUMENT_CAPACITY 256
 

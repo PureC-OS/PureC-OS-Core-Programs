@@ -1,4 +1,4 @@
-#include "../../libc/include/purec.h"
+#include "libc/include/purec.h"
 
 #define HDDCHECK_DEVICE_CAPACITY 20
 
