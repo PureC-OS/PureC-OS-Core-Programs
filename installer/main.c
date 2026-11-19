@@ -933,15 +933,56 @@ static bool add_trusted_line(const char *name, const char *url)
     return true;
 }
 
+#define DISTRO_LIST "/etc/distro-packages"
+#define LIVE_FILES "/etc/live-files"
+#define DISTRO_MAX 64
+
+static char distro_pkgs[DISTRO_MAX][64];
+static int distro_count;
+
+static void load_distro_list(void)
+{
+    FILE *f = fopen(DISTRO_LIST, "r");
+    char line[128];
+    distro_count = 0;
+    if (!f)
+        return;
+    while (fgets(line, sizeof(line), f) && distro_count < DISTRO_MAX) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (!line[0] || line[0] == '#')
+            continue;
+        snprintf(distro_pkgs[distro_count++], sizeof(distro_pkgs[0]), "%s", line);
+    }
+    fclose(f);
+}
+
+static void remove_live_files(void)
+{
+    FILE *f = fopen(LIVE_FILES, "r");
+    char line[256];
+    if (!f)
+        return;
+    while (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (line[0] == '/' && !strstr(line, ".."))
+            unlink(line);
+    }
+    fclose(f);
+    unlink(LIVE_FILES);
+}
+
 static bool install_packages(void)
 {
-    char *argv[MAX_TRUSTED + 8];
+    char *argv[MAX_TRUSTED + DISTRO_MAX + 8];
     int n = 0;
     argv[n++] = "/usr/bin/pkg";
     argv[n++] = "-S";
     argv[n++] = "--noconfirm";
     argv[n++] = "--needed";
-    if (cfg.desktop)
+    if (cfg.desktop && distro_count)
+        for (int i = 0; i < distro_count; i++)
+            argv[n++] = distro_pkgs[i];
+    else if (cfg.desktop)
         argv[n++] = USERSPACE_PKG;
     for (int i = 0; i < cfg.package_count; i++)
         argv[n++] = cfg.packages[i];
@@ -975,6 +1016,7 @@ static int do_install(void)
         warnings = true;
         printf("WARNING: cannot add %s to " PKG_CONF "\n", USERSPACE_PKG);
     }
+    remove_live_files();
     bool desktop_ok = cfg.desktop;
     if (cfg.desktop || cfg.package_count) {
         printf("\n== Packages ==\n");
@@ -1174,6 +1216,9 @@ int main(int argc, char **argv)
     snprintf(cfg.hostname, sizeof(cfg.hostname), "purec");
     snprintf(cfg.timezone, sizeof(cfg.timezone), "UTC");
     load_trusted();
+    load_distro_list();
+    if (distro_count)
+        cfg.desktop = true;
     char loaded[256] = "";
     const char *config = NULL;
     for (int i = 1; i < argc; i++) {
