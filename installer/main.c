@@ -964,11 +964,28 @@ static void remove_live_files(void)
         return;
     while (fgets(line, sizeof(line), f)) {
         line[strcspn(line, "\r\n")] = 0;
-        if (line[0] == '/' && !strstr(line, ".."))
-            unlink(line);
+        if (line[0] != '/' || strstr(line, ".."))
+            continue;
+        const char *base = strrchr(line, '/') + 1;
+        char stock[256];
+        snprintf(stock, sizeof(stock), "/usr/lib/init/system/%s", base);
+        FILE *in = strncmp(line, "/etc/init/system/", 17) == 0 ? fopen(stock, "r") : NULL;
+        FILE *out = fopen(line, "w");
+        if (in && out) {
+            char buf[512];
+            size_t got;
+            while ((got = fread(buf, 1, sizeof(buf), in)) > 0)
+                fwrite(buf, 1, got, out);
+        }
+        if (in)
+            fclose(in);
+        if (out)
+            fclose(out);
     }
     fclose(f);
-    unlink(LIVE_FILES);
+    FILE *done = fopen(LIVE_FILES, "w");
+    if (done)
+        fclose(done);
 }
 
 static bool install_packages(void)
@@ -1006,11 +1023,13 @@ static int do_install(void)
     }
     bool warnings = false;
     printf("\n== Boot loader (root=UUID=) ==\n");
-    char *mkinit[] = {"/sbin/mkinitcpio", "-u", NULL};
+    char root_part[sizeof(cfg.disk.name) + 4];
+    snprintf(root_part, sizeof(root_part), "%s2", cfg.disk.name);
+    char *mkinit[] = {"/sbin/mkinitcpio", "-u", "-r", root_part, "-b", "/boot", NULL};
     if (run(mkinit) != 0) {
         warnings = true;
         printf("WARNING: mkinitcpio failed; the installed system may boot the live initramfs.\n"
-               "After booting it, run: mkinitcpio -u\n");
+               "After booting it, run: mkinitcpio -u -r %s\n", root_part);
     }
     if (cfg.desktop && cfg.userspace_url[0] && !add_trusted_line(USERSPACE_PKG, cfg.userspace_url)) {
         warnings = true;
@@ -1022,8 +1041,13 @@ static int do_install(void)
         printf("\n== Packages ==\n");
         if (!install_packages()) {
             warnings = true;
-            desktop_ok = false;
-            printf("WARNING: packages were not installed. After booting run: pkg -Sy, then pkg -S <names>\n");
+            if (distro_count) {
+                printf("WARNING: packages could not be updated from the registry; the system from the image is kept.\n"
+                       "After booting run: pkg -Syu\n");
+            } else {
+                desktop_ok = false;
+                printf("WARNING: packages were not installed. After booting run: pkg -Sy, then pkg -S <names>\n");
+            }
         }
     }
     mkdir("/etc/init", 0755);
