@@ -7,16 +7,17 @@ OBJ := $(BIN_DIR)/obj/strace
 LIB_DIR := $(BIN_DIR)/lib
 LIBGUI_DIR ?= $(ROOT_DIR)/PureC-OS-LibGui
 VB_DIR ?= $(ROOT_DIR)/video-backend
-LIBPG := $(BIN_DIR)/libgui/libpg.a
-LIBVB := $(BIN_DIR)/video-backend/libvb.a
-LIBPUREC := $(LIB_DIR)/libpurec.a
-CRT0 := $(LIB_DIR)/crt0.o
-LINKER_SCRIPT := $(ROOT_DIR)/linker-userspace.ld
+LIBPG := $(BIN_DIR)/libgui/libpg.so
+LIBVB := $(BIN_DIR)/video-backend/libvb.so
+LIBPUREC := $(LIB_DIR)/libpurec.so
+CRT0 := $(DYN_CRT0)
+LINKER_SCRIPT := $(ROOT_DIR)/linker-userspace-pie-interp.ld
 TRACELIB_OBJ ?= $(BIN_DIR)/obj/programs/tracelib/sysnames.o
+TRACELIB_PIC := $(OBJ)/sysnames-pic.o
 TRACELIB_SRC := $(abspath ..)/tracelib
 
 CFLAGS := $(CPPFLAGS) -I$(LIBC_DIR)/include/hosted -I$(LIBGUI_DIR)/include -I$(VB_DIR)/include \
-	$(USER_CFLAGS) -O2 -Wall -Wextra $(DEPFLAGS)
+	$(DYN_CFLAGS) -O2 -Wall -Wextra $(DEPFLAGS)
 
 OBJECTS := $(patsubst src/%.c,$(OBJ)/%.o,$(wildcard src/*.c))
 TARGET := $(OUT)/$(NAME)
@@ -28,13 +29,13 @@ $(OBJ)/%.o: src/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(TRACELIB_OBJ): $(TRACELIB_SRC)/sysnames.c $(TRACELIB_SRC)/sysnames_table.inc
+$(TRACELIB_PIC): $(TRACELIB_SRC)/sysnames.c $(TRACELIB_SRC)/sysnames_table.inc
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(TARGET): $(OBJECTS) $(TRACELIB_OBJ) $(LIBPG) $(LIBVB) $(CRT0) $(LIBPUREC) $(LINKER_SCRIPT)
+$(TARGET): $(OBJECTS) $(TRACELIB_PIC) $(LIBPG) $(LIBVB) $(CRT0) $(LIBPUREC) $(LINKER_SCRIPT)
 	@mkdir -p $(@D)
-	$(LD) -T $(LINKER_SCRIPT) -o $@ $(CRT0) $(OBJECTS) $(TRACELIB_OBJ) $(LIBPG) $(LIBVB) $(LIBPUREC)
+	$(LD) $(DYN_EXE_LDFLAGS) -o $@ $(CRT0) $(OBJECTS) $(TRACELIB_PIC) -L$(dir $(LIBPG)) -L$(dir $(LIBVB)) -lpg -lvb $(DYN_LIBPUREC)
 
 $(LIBPG):
 	$(MAKE) -C $(LIBGUI_DIR) ROOT_DIR=$(ROOT_DIR)

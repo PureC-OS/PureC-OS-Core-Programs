@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import glob
 import os
 import subprocess
 import sys
@@ -13,6 +14,8 @@ DESC = {
     "accounts": "PureC OS user identity commands and sudo",
     "system": "PureC OS system information and process utilities",
     "installer": "PureC OS system installer",
+    "libc": "PureC OS C library and dynamic loader (libpurec.so, ld-purec.so.1)",
+    "libpurecrypt": "PureC OS crypto library (SHA-1, SHA-512, AES, crypt)",
     "monitor": "Graphical system monitor",
     "strace": "Graphical system call tracer",
     "core-tests": "PureC OS kernel and libc test programs",
@@ -21,8 +24,12 @@ DESC = {
     "doom": "Chocolate Doom with the Freedoom Phase 1 IWAD",
 }
 
-CORE = ["init", "sh", "coreutils", "net-tools", "disk-utils", "accounts", "system", "installer", "core-tests", "monitor", "strace"]
-DEPS = {"base": ["init", "sh", "coreutils", "net-tools", "disk-utils", "accounts", "system", "pkg"]}
+CORE = ["libc", "libpurecrypt", "init", "sh", "coreutils", "net-tools", "disk-utils", "accounts", "system", "installer", "core-tests", "monitor", "strace"]
+DEPS = {"core-tests": ["libc"], "monitor": ["libc", "libgui", "video-backend"], "strace": ["libc", "libgui", "video-backend"], "base": ["libc", "init", "sh", "coreutils", "net-tools", "disk-utils", "accounts", "system", "pkg"]}
+LIBS = {
+    "libc": [("lib", "lib/libpurec.so*", True), ("lib", "lib/ld-purec.so.1", True)],
+    "libpurecrypt": [("usr/lib", "lib/libpurecrypt.so*", True)],
+}
 EXTRA = {
     "lua": [("usr/bin/lua", "@lua")],
     "micropython": [("usr/bin/micropython", "@micropython")],
@@ -52,6 +59,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True)
     parser.add_argument("--programs", required=True)
+    parser.add_argument("--bin")
     parser.add_argument("--conf", required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--pkgrel", default="1")
@@ -61,6 +69,8 @@ def main():
 
     mkpkg = os.path.join(args.root, "mk", "pkg", "mkpkg.py")
     pkgsign = os.path.join(args.root, "mk", "pkg", "pkgsign.py")
+    if not args.bin:
+        args.bin = os.path.dirname(os.path.normpath(args.programs))
     packages = load(args.conf)
     for name, entries in EXTRA.items():
         packages[name] = [(d, s, False) for d, s in entries]
@@ -79,6 +89,19 @@ def main():
                 cmd += ["--depend", dep]
         else:
             cmd += ["--desc", DESC[name]]
+            for dep in DEPS.get(name, []):
+                cmd += ["--depend", dep]
+            for dest, pattern, required in LIBS.get(name, []):
+                found = sorted(glob.glob(os.path.join(args.bin, pattern)))
+                if not found and required:
+                    sys.exit("mkpackages: missing %s for %s" % (pattern, name))
+                for path in found:
+                    target = dest + "/" + os.path.basename(path)
+                    if os.path.islink(path):
+                        cmd += ["--link", "%s=%s" % (target, os.readlink(path))]
+                    else:
+                        cmd += ["--file", "%s=%s" % (target, path)]
+                    count += 1
             for dest, source, required in packages.get(name, []):
                 path = resolve(source, args.root, args.programs)
                 if not os.path.isfile(path):

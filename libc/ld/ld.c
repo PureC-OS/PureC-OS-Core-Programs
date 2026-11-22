@@ -125,6 +125,7 @@ struct obj {
   const uint64_t *fini_array;
   uint64_t fini_arraysz;
   const char *runpath;
+  const char *rpath;
   struct obj **deps;
   uint64_t ndeps;
   struct obj **scope;
@@ -173,6 +174,9 @@ static struct obj *global_tail;
 static struct obj *main_obj;
 static const char *const *env_vector;
 static const char *library_path_env;
+static int debug_libs;
+static int trace_mode;
+static int trace_missing;
 static int force_now;
 static uint64_t adds_counter;
 static uint64_t subs_counter;
@@ -578,7 +582,7 @@ static void parse_dynamic(struct obj *o)
     if (runpath != (uint64_t)-1)
       o->runpath = o->strtab + runpath;
     else if (rpath != (uint64_t)-1)
-      o->runpath = o->strtab + rpath;
+      o->rpath = o->strtab + rpath;
     if (soname != (uint64_t)-1)
       o->soname = o->strtab + soname;
   }
@@ -801,6 +805,128 @@ static int try_open_in(const char *dir, uint64_t dlen, const char *name, char *o
   return ld_open(out);
 }
 
+static void write_out(const char *s)
+{
+  sys3(SYS_WRITE_N, (uint64_t)s, slen(s), 1);
+}
+
+static void write_hex(uint64_t v)
+{
+  char buf[19];
+  int n = 18;
+  buf[n] = 0;
+  do
+  {
+    buf[--n] = "0123456789abcdef"[v & 15];
+    v >>= 4;
+  } while (v);
+  buf[--n] = 'x';
+  buf[--n] = '0';
+  write_out(buf + n);
+}
+
+static int try_open_logged(const char *dir, uint64_t dlen, const char *name, char *out,
+                           uint64_t cap)
+{
+  int fd = try_open_in(dir, dlen, name, out, cap);
+  if (debug_libs)
+  {
+    write_err("pc-ld: trying ");
+    write_err(fd >= 0 ? out : name);
+    write_err(fd >= 0 ? " (found)\n" : " (no)\n");
+  }
+  return fd;
+}
+
+static int search_list(const char *list, const char *name, char *path, uint64_t cap)
+{
+  while (list && *list)
+  {
+    const char *end = list;
+    while (*end && *end != ':')
+      end++;
+    if (end > list)
+    {
+      int fd = try_open_logged(list, (uint64_t)(end - list), name, path, cap);
+      if (fd >= 0)
+        return fd;
+    }
+    list = *end ? end + 1 : end;
+  }
+  return -1;
+}
+
+static int cache_lookup(const char *name, char *path, uint64_t cap)
+{
+  int fd = ld_open("/etc/ld.so.cache");
+  if (fd < 0)
+    return -1;
+  static const char magic[] = "PCLDCACHE1";
+  char chunk[1024];
+  char line[640];
+  uint64_t ll = 0;
+  int header = 0;
+  int result = -1;
+  uint64_t nlen = slen(name);
+  for (;;)
+  {
+    int64_t got = sys3(SYS_FILE_READ_N, (uint64_t)fd, (uint64_t)chunk, sizeof(chunk));
+    if (got <= 0)
+      break;
+    for (int64_t i = 0; i < got && result < 0; i++)
+    {
+      char c = chunk[i];
+      if (c != '\n')
+      {
+        if (ll < sizeof(line) - 1)
+          line[ll++] = c;
+        else
+          ll = sizeof(line);
+        continue;
+      }
+      if (ll < sizeof(line))
+      {
+        line[ll] = 0;
+        if (!header)
+        {
+          if (scmp(line, magic) != 0)
+          {
+            ld_close(fd);
+            return -1;
+          }
+          header = 1;
+        }
+        else if (ll > nlen + 2 && line[nlen] == '\t' && line[nlen + 1] == '/')
+        {
+          line[nlen] = 0;
+          if (scmp(line, name) == 0)
+          {
+            uint64_t pl = slen(line + nlen + 1);
+            if (pl + 1 <= cap)
+            {
+              memcpy(path, line + nlen + 1, pl + 1);
+              int lf = ld_open(path);
+              if (debug_libs)
+              {
+                write_err("pc-ld: cache ");
+                write_err(path);
+                write_err(lf >= 0 ? " (found)\n" : " (no)\n");
+              }
+              if (lf >= 0)
+                result = lf;
+            }
+          }
+        }
+      }
+      ll = 0;
+    }
+    if (result >= 0)
+      break;
+  }
+  ld_close(fd);
+  return result;
+}
+
 static int open_library(const struct obj *requester, const char *name, char *path, uint64_t cap)
 {
   int has_slash = 0;
@@ -815,28 +941,41 @@ static int open_library(const struct obj *requester, const char *name, char *pat
     memcpy(path, name, n + 1);
     return ld_open(path);
   }
-  const char *lists[3] = {library_path_env, requester ? requester->runpath : 0, 0};
-  for (int i = 0; i < 2; i++)
+  if (debug_libs)
   {
-    const char *list = lists[i];
-    while (list && *list)
-    {
-      const char *end = list;
-      while (*end && *end != ':')
-        end++;
-      if (end > list)
-      {
-        int fd = try_open_in(list, (uint64_t)(end - list), name, path, cap);
-        if (fd >= 0)
-          return fd;
-      }
-      list = *end ? end + 1 : end;
-    }
+    write_err("pc-ld: searching for ");
+    write_err(name);
+    write_err("\n");
   }
+  int fd;
+  if (requester && requester->rpath)
+  {
+    fd = search_list(requester->rpath, name, path, cap);
+    if (fd >= 0)
+      return fd;
+  }
+  if (main_obj && main_obj != requester && main_obj->rpath && !main_obj->runpath)
+  {
+    fd = search_list(main_obj->rpath, name, path, cap);
+    if (fd >= 0)
+      return fd;
+  }
+  fd = search_list(library_path_env, name, path, cap);
+  if (fd >= 0)
+    return fd;
+  if (requester && requester->runpath)
+  {
+    fd = search_list(requester->runpath, name, path, cap);
+    if (fd >= 0)
+      return fd;
+  }
+  fd = cache_lookup(name, path, cap);
+  if (fd >= 0)
+    return fd;
   static const char *const defaults[] = {"/lib", "/usr/lib", "/lib64", 0};
   for (int i = 0; defaults[i]; i++)
   {
-    int fd = try_open_in(defaults[i], slen(defaults[i]), name, path, cap);
+    fd = try_open_logged(defaults[i], slen(defaults[i]), name, path, cap);
     if (fd >= 0)
       return fd;
   }
@@ -890,6 +1029,7 @@ static struct obj *load_file(int fd, const char *path)
 }
 
 static int load_deps(struct obj *o, struct obj **created);
+#define TRACE_SKIP ((struct obj *)1)
 
 static struct obj *load_named(const struct obj *requester, const char *name,
                               struct obj **created)
@@ -901,6 +1041,14 @@ static struct obj *load_named(const struct obj *requester, const char *name,
   int fd = open_library(requester, name, path, sizeof(path));
   if (fd < 0)
   {
+    if (trace_mode)
+    {
+      write_out("\t");
+      write_out(name);
+      write_out(" => not found\n");
+      trace_missing = 1;
+      return TRACE_SKIP;
+    }
     set_error(name, "cannot open shared object file");
     return 0;
   }
@@ -941,6 +1089,8 @@ static int load_deps(struct obj *o, struct obj **created)
     if (d->tag != DT_NEEDED)
       continue;
     struct obj *dep = load_named(o, o->strtab + d->val, created);
+    if (dep == TRACE_SKIP)
+      continue;
     if (!dep)
       return -1;
     o->deps[o->ndeps++] = dep;
@@ -1268,6 +1418,18 @@ static uint64_t dl_main(uint64_t *frame, const Phdr *ph, uint16_t phnum, uint64_
     library_path_env = env_lookup("LD_LIBRARY_PATH");
     if (env_lookup("LD_BIND_NOW"))
       force_now = 1;
+    const char *dbg = env_lookup("LD_DEBUG");
+    if (dbg)
+    {
+      for (const char *c = dbg; *c; c++)
+        if (c[0] == 'l' && c[1] == 'i' && c[2] == 'b' && c[3] == 's')
+          debug_libs = 1;
+      if (dbg[0] == 'a' && dbg[1] == 'l' && dbg[2] == 'l')
+        debug_libs = 1;
+    }
+    const char *tr = env_lookup("LD_TRACE_LOADED_OBJECTS");
+    if (tr && *tr && !(tr[0] == '0' && !tr[1]))
+      trace_mode = 1;
   }
   struct obj *exe = ld_alloc(sizeof(struct obj));
   if (!exe)
@@ -1304,6 +1466,31 @@ static uint64_t dl_main(uint64_t *frame, const Phdr *ph, uint16_t phnum, uint64_
   struct obj *created = 0;
   if (load_deps(exe, &created) < 0)
     fatal(error_text, 0);
+  if (trace_mode)
+  {
+    for (struct obj *o = objs_head; o; o = o->next)
+    {
+      if (o->is_exe)
+        continue;
+      const char *base = o->path;
+      for (const char *c = o->path; *c; c++)
+        if (*c == '/')
+          base = c + 1;
+      write_out("\t");
+      if (interp_base && o->base == interp_base)
+        write_out(o->path);
+      else
+      {
+        write_out(o->soname ? o->soname : base);
+        write_out(" => ");
+        write_out(o->path);
+      }
+      write_out(" (");
+      write_hex(o->base);
+      write_out(")\n");
+    }
+    sys3(SYS_EXIT_N, trace_missing ? 1 : 0, 0, 0);
+  }
   if (build_scope(exe) < 0)
     fatal("out of memory", 0);
   for (struct obj *o = created; o; o = o->cnext)

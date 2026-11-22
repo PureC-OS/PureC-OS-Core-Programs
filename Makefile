@@ -72,7 +72,7 @@ GENERAL_CPP_SOURCES :=
 UTILS := ls cat cp mv rm mkdir rmdir touch chmod stat find tree du df install realpath basename dirname \
 	grep head tail wc sort uniq cut tr tee cmp diff nl rev seq yes xargs xxd \
 	echo pwd env uname whoami id hostname date uptime sleep true false kill ps free which \
-	clear reboot ping man less help cd sudo ip host ss chvt tty fdisk iwxctl blkid mkinitcpio sync
+	clear reboot ping man less help cd sudo ip host ss chvt tty fdisk iwxctl blkid mkinitcpio sync ldd ldconfig
 UTIL_LIB_OBJECTS := $(OBJ_DIR)/utils/lib/common.o $(OBJ_DIR)/utils/lib/pager.o $(OBJ_DIR)/utils/lib/fileops.o
 UTIL_OBJECTS := $(foreach u,$(UTILS),$(OBJ_DIR)/utils/$(u)/$(u).o) $(UTIL_LIB_OBJECTS) $(OBJ_DIR)/utils/trace/trace.o
 TRACELIB_OBJ := $(OBJ_DIR)/tracelib/sysnames.o
@@ -165,7 +165,7 @@ all: $(TARGETS)
 
 packages: all
 	@if test -f $(PKG_DIR)/Makefile; then $(MAKE) -C $(PKG_DIR) package; fi
-	python3 $(SRC_DIR)/mkpackages.py --root $(ROOT_DIR) --programs $(PROGRAM_DIR) --conf $(SRC_DIR)/packages.conf \
+	python3 $(SRC_DIR)/mkpackages.py --root $(ROOT_DIR) --programs $(PROGRAM_DIR) --conf $(SRC_DIR)/packages.conf --bin $(BIN_DIR) \
 		--version $(VERSION) --pkgrel $(PKGREL) --out $(REPO_DIR) --sign-key $(SIGN_KEY)
 	@if test -d $(BIN_DIR)/repo; then cp $(BIN_DIR)/repo/pkg-*.pkg.tar.gz* $(REPO_DIR)/ 2>/dev/null || true; fi
 	@ls $(REPO_DIR)
@@ -184,42 +184,54 @@ $(LIBPUREC):
 $(LIB_DIR)/libpurec.so $(LIB_DIR)/ld-purec.so.1 $(DYN_LD_STUB):
 	$(MAKE) -C $(LIBC_DIR)
 
-ifdef PUREC_DYNAMIC
-TARGETS += $(PROGRAM_DIR)/echo-dyn
-all: $(PROGRAM_DIR)/echo-dyn $(PROGRAM_DIR)/dltest-dyn $(LIB_DIR)/libdltest.so $(LIB_DIR)/libdltest2.so
 PIE_LD_SCRIPT := $(ROOT_DIR)/linker-userspace-pie.ld
 PIE_INTERP_SCRIPT := $(ROOT_DIR)/linker-userspace-pie-interp.ld
+DYN_TARGETS := $(PROGRAM_DIR)/echo-dyn $(PROGRAM_DIR)/dltest-dyn $(LIB_DIR)/libdltest.so $(LIB_DIR)/libdltest2.so
+TARGETS += $(DYN_TARGETS)
+all: $(DYN_TARGETS)
+CRYPT_SO_REAL := $(LIB_DIR)/libpurecrypt.so.$(LIBPURECRYPT_SOVER)
+CRYPT_SO_TARGETS := $(CRYPT_SO_REAL) $(LIB_DIR)/libpurecrypt.so.$(LIBPURECRYPT_SOMAJOR) $(LIB_DIR)/libpurecrypt.so
+all: $(CRYPT_SO_TARGETS)
 
-$(PROGRAM_DIR)/echo-dyn: $(OBJ_DIR)/echo/echo-pic.o $(LIB_DIR)/libpurec.so $(LIB_DIR)/ld-purec.so.1 $(PIE_INTERP_SCRIPT)
+$(CRYPT_SO_REAL):
+	$(MAKE) -C $(CRYPT_DIR) shared SOMAJOR=$(LIBPURECRYPT_SOMAJOR) SOVER=$(LIBPURECRYPT_SOVER) CROSS=$(CROSS)
 	@mkdir -p $(@D)
-	$(LD) $(INTERP_EXE_LINK_FLAGS) -o $@ $(OBJ_DIR)/echo/echo-pic.o $(LIB_DIR)/libpurec.so
+	cp $(CRYPT_DIR)/build/libpurecrypt.so.$(LIBPURECRYPT_SOVER) $@
+
+$(LIB_DIR)/libpurecrypt.so.$(LIBPURECRYPT_SOMAJOR): $(CRYPT_SO_REAL)
+	ln -sf $(notdir $<) $@
+
+$(LIB_DIR)/libpurecrypt.so: $(LIB_DIR)/libpurecrypt.so.$(LIBPURECRYPT_SOMAJOR)
+	ln -sf $(notdir $<) $@
+
+DYN_DEPS := $(LIB_DIR)/libpurec.so $(LIB_DIR)/ld-purec.so.1 $(LIB_DIR)/crt0-pic.o
+
+$(LIB_DIR)/crt0-pic.o:
+	$(MAKE) -C $(LIBC_DIR)
+
+$(PROGRAM_DIR)/echo-dyn: $(OBJ_DIR)/echo/echo-pic.o $(DYN_DEPS) $(PIE_INTERP_SCRIPT)
+	@mkdir -p $(@D)
+	$(LD) $(DYN_EXE_LDFLAGS) -o $@ $(OBJ_DIR)/echo/echo-pic.o $(DYN_LIBPUREC)
 
 $(OBJ_DIR)/echo/echo-pic.o: $(SRC_DIR)/utils/test/echo_dyn/echo.c
 	@mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(USER_SO_CFLAGS) -c $< -o $@
-
-TARGETS += $(PROGRAM_DIR)/dltest-dyn $(LIB_DIR)/libdltest.so $(LIB_DIR)/libdltest2.so
+	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(DYN_CFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/dltest/%-pic.o: $(SRC_DIR)/dltest/%.c
 	@mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) -I$(LIBC_DIR)/include/hosted $(DEPFLAGS) $(USER_SO_CFLAGS) -c $< -o $@
+	$(CC) $(CPPFLAGS) -I$(LIBC_DIR)/include/hosted $(DEPFLAGS) $(DYN_CFLAGS) -c $< -o $@
 
 $(LIB_DIR)/libdltest.so: $(OBJ_DIR)/dltest/libdltest-pic.o $(LIB_DIR)/libpurec.so
 	@mkdir -p $(@D)
-	$(LD) $(SO_LINK_FLAGS) -soname libdltest.so -o $@ $(OBJ_DIR)/dltest/libdltest-pic.o $(LIB_DIR)/libpurec.so
+	$(LD) $(SHLIB_LDFLAGS) $(call SHLIB_SONAME,libdltest.so) -L$(DYN_LIB_DIR) -o $@ $(OBJ_DIR)/dltest/libdltest-pic.o $(DYN_LIBPUREC)
 
 $(LIB_DIR)/libdltest2.so: $(OBJ_DIR)/dltest/libdltest2-pic.o $(LIB_DIR)/libdltest.so
 	@mkdir -p $(@D)
-	$(LD) $(SO_LINK_FLAGS) -soname libdltest2.so -o $@ $(OBJ_DIR)/dltest/libdltest2-pic.o $(LIB_DIR)/libdltest.so
+	$(LD) $(SHLIB_LDFLAGS) $(call SHLIB_SONAME,libdltest2.so) -o $@ $(OBJ_DIR)/dltest/libdltest2-pic.o $(LIB_DIR)/libdltest.so
 
-$(OBJ_DIR)/dltest/crt0-pic.o: $(LIBC_DIR)/crt0.c
+$(PROGRAM_DIR)/dltest-dyn: $(OBJ_DIR)/dltest/main-pic.o $(DYN_DEPS) $(PIE_INTERP_SCRIPT)
 	@mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(USER_SO_CFLAGS) -c $< -o $@
-
-$(PROGRAM_DIR)/dltest-dyn: $(OBJ_DIR)/dltest/main-pic.o $(OBJ_DIR)/dltest/crt0-pic.o $(LIB_DIR)/libpurec.so $(LIB_DIR)/ld-purec.so.1 $(PIE_INTERP_SCRIPT)
-	@mkdir -p $(@D)
-	$(LD) $(INTERP_EXE_LINK_FLAGS) -o $@ $(OBJ_DIR)/dltest/crt0-pic.o $(OBJ_DIR)/dltest/main-pic.o $(LIB_DIR)/libpurec.so
-endif
+	$(LD) $(DYN_EXE_LDFLAGS) -o $@ $(DYN_CRT0) $(OBJ_DIR)/dltest/main-pic.o $(DYN_LIBPUREC)
 
 -include $(UTIL_OBJECTS:.o=.d)
 
