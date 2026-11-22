@@ -4,6 +4,8 @@
 #include <unistd.h>
 
 int dltest_counter = 100;
+__thread int dltest_tls_value = 41;
+__thread char dltest_tls_zero[64];
 static int ctor_ran;
 
 extern int dltest_exe_value __attribute__((weak));
@@ -52,4 +54,17 @@ int dltest_use_exe_symbol(void)
 const char *dltest_name(void)
 {
     return "libdltest";
+}
+
+int *dltest_tls_addr(void)
+{
+    return &dltest_tls_value;
+}
+
+int dltest_tls_zero_ok(void)
+{
+    for (int i = 0; i < 64; i++)
+        if (dltest_tls_zero[i])
+            return 0;
+    return 1;
 }

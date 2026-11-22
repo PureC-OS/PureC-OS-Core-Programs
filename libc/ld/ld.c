@@ -1,5 +1,6 @@
 #include <stddef.h>
 #include <stdint.h>
+#include "ld_tls.h"
 
 #define PAGE 4096ULL
 #define SYS_WRITE_N 1
@@ -66,6 +67,7 @@
 #define R_DTPOFF64 17
 #define R_TPOFF64 18
 #define R_TLSDESC 36
+#define R_TPOFF32 23
 #define R_IRELATIVE 37
 
 #define STB_LOCAL 0
@@ -136,6 +138,7 @@ struct obj {
   uint8_t bind_now;
   uint8_t pinned;
   uint8_t symbolic;
+  uint64_t tls_modid;
 };
 
 struct dl_info_t {
@@ -158,7 +161,9 @@ struct dl_phdr_info_t {
 
 extern const Ehdr __ehdr_start HIDDEN;
 extern const Dyn _DYNAMIC[] HIDDEN;
+#ifndef PC_LD_INTERP
 extern void _start(void) HIDDEN;
+#endif
 extern void _pc_dl_resolve(void) HIDDEN;
 
 static struct obj *objs_head;
@@ -339,13 +344,15 @@ static uint32_t gnu_hash_fn(const char *name)
   return h;
 }
 
+static int lookup_tls_mode;
+
 static int sym_usable(const Sym *s)
 {
   if (s->shndx == SHN_UNDEF)
     return 0;
   uint8_t type = s->info & 15;
   uint8_t bind = s->info >> 4;
-  if (type == STT_TLS)
+  if ((type == STT_TLS) != (lookup_tls_mode != 0))
     return 0;
   return bind == STB_GLOBAL || bind == STB_WEAK;
 }
@@ -643,11 +650,6 @@ static int map_object(struct obj *o, int fd, const Ehdr *eh, const Phdr *ph)
   uint64_t lo = ~0ULL, hi = 0;
   for (uint16_t i = 0; i < eh->phnum; i++)
   {
-    if (ph[i].type == PT_TLS && ph[i].memsz)
-    {
-      set_error(o->path, "thread-local storage is not supported");
-      return -1;
-    }
     if (ph[i].type != PT_LOAD)
       continue;
     uint64_t s = ph[i].vaddr & ~(PAGE - 1);
@@ -706,6 +708,16 @@ static int map_object(struct obj *o, int fd, const Ehdr *eh, const Phdr *ph)
   {
     if (ph[i].type == PT_DYNAMIC)
       o->dyn = (const Dyn *)(o->base + ph[i].vaddr);
+    if (ph[i].type == PT_TLS && ph[i].memsz)
+    {
+      o->tls_modid = ld_tls_register((const void *)(o->base + ph[i].vaddr),
+                                     ph[i].filesz, ph[i].memsz, ph[i].align);
+      if (!o->tls_modid)
+      {
+        set_error(o->path, "too many thread-local modules");
+        return -1;
+      }
+    }
   }
   if (!o->dyn)
   {
@@ -858,6 +870,7 @@ static struct obj *load_file(int fd, const char *path)
   o->path = dup_str(path);
   if (map_object(o, fd, &eh, ph) < 0)
   {
+    ld_tls_release(o->tls_modid);
     if (o->lo)
       sys3(SYS_MUNMAP_N, o->lo, o->hi - o->lo, 0);
     return 0;
@@ -866,6 +879,7 @@ static struct obj *load_file(int fd, const char *path)
   if (!o->symtab || !o->strtab)
   {
     set_error(path, "missing symbol table");
+    ld_tls_release(o->tls_modid);
     sys3(SYS_MUNMAP_N, o->lo, o->hi - o->lo, 0);
     return 0;
   }
@@ -974,6 +988,45 @@ static int build_scope(struct obj *root)
   return 0;
 }
 
+static int reloc_tls(struct obj *o, const Rela *r, uint32_t type, uint32_t symidx,
+                     uint64_t *where)
+{
+  const struct obj *def = o;
+  uint64_t symoff = 0;
+  if (symidx)
+  {
+    const Sym *own = &o->symtab[symidx];
+    const char *name = o->strtab + own->name;
+    if ((own->info >> 4) == STB_LOCAL && own->shndx != SHN_UNDEF)
+      symoff = own->value;
+    else
+    {
+      lookup_tls_mode = 1;
+      struct found f = find_symbol(o, name, 0);
+      lookup_tls_mode = 0;
+      if (!f.sym)
+      {
+        if ((own->info >> 4) != STB_WEAK)
+        {
+          set_error(name, "undefined thread-local symbol");
+          return -1;
+        }
+        *where = 0;
+        return 0;
+      }
+      def = f.obj;
+      symoff = f.sym->value;
+    }
+  }
+  const char *err = 0;
+  if (ld_tls_reloc(type, def->tls_modid, symoff, r->addend, where, &err) < 0)
+  {
+    set_error(o->path, err);
+    return -1;
+  }
+  return 0;
+}
+
 static int reloc_one(struct obj *o, const Rela *r, int lazy)
 {
   uint32_t type = (uint32_t)(r->info & 0xffffffffu);
@@ -991,9 +1044,11 @@ static int reloc_one(struct obj *o, const Rela *r, int lazy)
     *where = ((uint64_t(*)(void))(o->base + (uint64_t)r->addend))();
     return 0;
   }
-  if (type == R_DTPMOD64 || type == R_DTPOFF64 || type == R_TPOFF64 || type == R_TLSDESC)
+  if (type == R_DTPMOD64 || type == R_DTPOFF64 || type == R_TPOFF64 || type == R_TPOFF32)
+    return reloc_tls(o, r, type, symidx, where);
+  if (type == R_TLSDESC)
   {
-    set_error(o->path, "thread-local relocation is not supported");
+    set_error(o->path, "TLS descriptors are not supported");
     return -1;
   }
   if (type == R_JUMP_SLOT && lazy)
@@ -1152,6 +1207,7 @@ static void release_object(struct obj *o)
   o->deps = 0;
   o->ndeps = 0;
   subs_counter++;
+  ld_tls_release(o->tls_modid);
   sys3(SYS_MUNMAP_N, lo, size, 0);
   for (uint64_t i = 0; i < ndeps; i++)
     drop_ref(deps[i]);
@@ -1164,6 +1220,7 @@ static void discard_created(struct obj *created)
     struct obj *next = o->cnext;
     global_remove(o);
     unlink_obj(o);
+    ld_tls_release(o->tls_modid);
     sys3(SYS_MUNMAP_N, o->lo, o->hi - o->lo, 0);
     o = next;
   }
@@ -1192,7 +1249,17 @@ static void finish_new(struct obj *created)
       o->deps[i]->refs++;
 }
 
-HIDDEN uint64_t pc_dl_start(uint64_t *frame)
+#ifdef PC_LD_INTERP
+static void register_interp(uint64_t interp_base);
+#else
+static void register_interp(uint64_t interp_base)
+{
+  (void)interp_base;
+}
+#endif
+
+static uint64_t dl_main(uint64_t *frame, const Phdr *ph, uint16_t phnum, uint64_t base,
+                        const Dyn *dyn, uint64_t entry, uint64_t interp_base)
 {
   uint64_t argc = frame[1];
   if (argc > 0 && argc < 0x10000)
@@ -1202,17 +1269,6 @@ HIDDEN uint64_t pc_dl_start(uint64_t *frame)
     if (env_lookup("LD_BIND_NOW"))
       force_now = 1;
   }
-  const Ehdr *eh = &__ehdr_start;
-  const Phdr *ph = (const Phdr *)((const uint8_t *)eh + eh->phoff);
-  uint64_t base = 0;
-  for (uint16_t i = 0; i < eh->phnum; i++)
-  {
-    if (ph[i].type == PT_LOAD && ph[i].offset == 0)
-    {
-      base = (uint64_t)eh - ph[i].vaddr;
-      break;
-    }
-  }
   struct obj *exe = ld_alloc(sizeof(struct obj));
   if (!exe)
     fatal("out of memory", 0);
@@ -1220,17 +1276,22 @@ HIDDEN uint64_t pc_dl_start(uint64_t *frame)
   exe->base = base;
   exe->path = "/proc/self/exe";
   exe->phdr = ph;
-  exe->phnum = eh->phnum;
-  exe->dyn = _DYNAMIC;
+  exe->phnum = phnum;
+  exe->dyn = dyn;
   exe->is_exe = 1;
   exe->pinned = 1;
   exe->refs = 1;
   exe->lo = base;
   exe->hi = base;
-  for (uint16_t i = 0; i < eh->phnum; i++)
+  for (uint16_t i = 0; i < phnum; i++)
   {
     if (ph[i].type == PT_TLS && ph[i].memsz)
-      fatal("thread-local storage is not supported", 0);
+    {
+      exe->tls_modid = ld_tls_register((const void *)(base + ph[i].vaddr),
+                                       ph[i].filesz, ph[i].memsz, ph[i].align);
+      if (!exe->tls_modid)
+        fatal("too many thread-local modules", 0);
+    }
     if (ph[i].type == PT_LOAD && base + ph[i].vaddr + ph[i].memsz > exe->hi)
       exe->hi = base + ph[i].vaddr + ph[i].memsz;
   }
@@ -1238,6 +1299,8 @@ HIDDEN uint64_t pc_dl_start(uint64_t *frame)
   main_obj = exe;
   link_obj(exe);
   global_add(exe);
+  if (interp_base)
+    register_interp(interp_base);
   struct obj *created = 0;
   if (load_deps(exe, &created) < 0)
     fatal(error_text, 0);
@@ -1251,17 +1314,47 @@ HIDDEN uint64_t pc_dl_start(uint64_t *frame)
   }
   for (uint64_t i = 1; i < exe->nscope; i++)
     global_add(exe->scope[i]);
+  {
+    const char *tls_err = 0;
+    if (ld_tls_finalize(&tls_err) < 0)
+      fatal(tls_err, 0);
+  }
   for (uint64_t i = exe->nscope; i > 0; i--)
   {
     struct obj *o = exe->scope[i - 1];
     if (relocate_object(o, !(force_now || o->bind_now)) < 0)
       fatal(error_text, 0);
   }
+  ld_tls_load_images();
+  {
+    const char *flag_name = "__pc_threaded";
+    struct found f = lookup_global(flag_name, sysv_hash(flag_name), gnu_hash_fn(flag_name), 0);
+    if (f.sym)
+      ld_tls_set_threaded_flag((volatile int *)(uintptr_t)(f.obj->base + f.sym->value));
+  }
   for (uint64_t i = 1; i < exe->nscope; i++)
     protect_object(exe->scope[i]);
   run_init(exe);
-  return (uint64_t)_start;
+  return entry;
 }
+
+#ifndef PC_LD_INTERP
+HIDDEN uint64_t pc_dl_start(uint64_t *frame)
+{
+  const Ehdr *eh = &__ehdr_start;
+  const Phdr *ph = (const Phdr *)((const uint8_t *)eh + eh->phoff);
+  uint64_t base = 0;
+  for (uint16_t i = 0; i < eh->phnum; i++)
+  {
+    if (ph[i].type == PT_LOAD && ph[i].offset == 0)
+    {
+      base = (uint64_t)eh - ph[i].vaddr;
+      break;
+    }
+  }
+  return dl_main(frame, ph, eh->phnum, base, _DYNAMIC, (uint64_t)_start, 0);
+}
+#endif
 
 static struct obj *handle_obj(void *handle)
 {
@@ -1330,6 +1423,7 @@ EXPORT void *__pc_dl_open(const char *name, int flags, void *caller)
     discard_created(created);
     return 0;
   }
+  ld_tls_load_images();
   for (struct obj *o = created; o; o = o->cnext)
     protect_object(o);
   finish_new(created);

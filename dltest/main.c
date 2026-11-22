@@ -1,11 +1,13 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <link.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
 int dltest_exe_value = 7;
+__thread int dltest_exe_tls = 11;
 
 static int failures;
 
@@ -19,6 +21,16 @@ static void check(const char *name, int ok)
 static int triple(int value)
 {
     return value * 3;
+}
+
+static void *tls_thread(void *argument)
+{
+    int *(*address)(void) = (int *(*)(void))argument;
+    int *value = address();
+    int ok = *value == 41 && dltest_exe_tls == 11;
+    *value = 99;
+    dltest_exe_tls = 12;
+    return (void *)(long)ok;
 }
 
 static int phdr_counter(struct dl_phdr_info *info, size_t size, void *data)
@@ -60,6 +72,23 @@ int main(void)
     int (*ctor_ran)(void) = (int (*)(void))dlsym(lib, "dltest_ctor_ran");
     check("static state set by constructor", ctor_ran && ctor_ran() == 1);
     check("dlsym data object", counter && (*counter)++ == 101 && *counter == 102);
+
+    int *(*tls_addr)(void) = (int *(*)(void))dlsym(lib, "dltest_tls_addr");
+    int (*tls_zero)(void) = (int (*)(void))dlsym(lib, "dltest_tls_zero_ok");
+    check("TLS init value in dlopened library", tls_addr && *tls_addr() == 41);
+    check("TLS .tbss zeroed in dlopened library", tls_zero && tls_zero());
+    check("TLS init value in executable", dltest_exe_tls == 11);
+    if (tls_addr)
+    {
+        *tls_addr() = 7;
+        dltest_exe_tls = 8;
+        pthread_t thread;
+        void *thread_ok = 0;
+        check("pthread_create with TLS", pthread_create(&thread, 0, tls_thread, (void *)tls_addr) == 0);
+        pthread_join(thread, &thread_ok);
+        check("TLS fresh copy in new thread", thread_ok == (void *)1);
+        check("TLS main thread values preserved", *tls_addr() == 7 && dltest_exe_tls == 8);
+    }
 
     void *none = dlsym(lib, "dltest_nope");
     error = dlerror();

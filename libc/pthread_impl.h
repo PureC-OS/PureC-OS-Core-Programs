@@ -56,6 +56,8 @@ struct pc_rlock
 
 extern int __pc_threaded;
 
+#define PC_TCB_DTV(tp) (((void **)(tp))[1])
+
 int64_t __pc_futex(int operation, volatile void *address, uint32_t value,
                    uint32_t timeout_ms);
 struct pthread *__pc_self(void);

@@ -181,17 +181,18 @@ $(LUA_OBJECTS): PRIVATE_CFLAGS := -DLUA_ANSI -I$(LIBC_DIR)/include/hosted -inclu
 $(LIBPUREC):
 	$(MAKE) -C $(LIBC_DIR)
 
-$(LIB_DIR)/libpurec.so $(DYN_LD_STUB):
+$(LIB_DIR)/libpurec.so $(LIB_DIR)/ld-purec.so.1 $(DYN_LD_STUB):
 	$(MAKE) -C $(LIBC_DIR)
 
 ifdef PUREC_DYNAMIC
 TARGETS += $(PROGRAM_DIR)/echo-dyn
 all: $(PROGRAM_DIR)/echo-dyn $(PROGRAM_DIR)/dltest-dyn $(LIB_DIR)/libdltest.so $(LIB_DIR)/libdltest2.so
 PIE_LD_SCRIPT := $(ROOT_DIR)/linker-userspace-pie.ld
+PIE_INTERP_SCRIPT := $(ROOT_DIR)/linker-userspace-pie-interp.ld
 
-$(PROGRAM_DIR)/echo-dyn: $(OBJ_DIR)/echo/echo-pic.o $(LIB_DIR)/libpurec.so $(DYN_LD_STUB) $(PIE_LD_SCRIPT)
+$(PROGRAM_DIR)/echo-dyn: $(OBJ_DIR)/echo/echo-pic.o $(LIB_DIR)/libpurec.so $(LIB_DIR)/ld-purec.so.1 $(PIE_INTERP_SCRIPT)
 	@mkdir -p $(@D)
-	$(LD) $(DYN_LINK_FLAGS) -o $@ $(OBJ_DIR)/echo/echo-pic.o $(DYN_LD_STUB) $(LIB_DIR)/libpurec.so
+	$(LD) $(INTERP_EXE_LINK_FLAGS) -o $@ $(OBJ_DIR)/echo/echo-pic.o $(LIB_DIR)/libpurec.so
 
 $(OBJ_DIR)/echo/echo-pic.o: $(SRC_DIR)/utils/test/echo_dyn/echo.c
 	@mkdir -p $(@D)
@@ -215,9 +216,9 @@ $(OBJ_DIR)/dltest/crt0-pic.o: $(LIBC_DIR)/crt0.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(USER_SO_CFLAGS) -c $< -o $@
 
-$(PROGRAM_DIR)/dltest-dyn: $(OBJ_DIR)/dltest/main-pic.o $(OBJ_DIR)/dltest/crt0-pic.o $(LIB_DIR)/libpurec.so $(DYN_LD_STUB) $(PIE_LD_SCRIPT)
+$(PROGRAM_DIR)/dltest-dyn: $(OBJ_DIR)/dltest/main-pic.o $(OBJ_DIR)/dltest/crt0-pic.o $(LIB_DIR)/libpurec.so $(LIB_DIR)/ld-purec.so.1 $(PIE_INTERP_SCRIPT)
 	@mkdir -p $(@D)
-	$(LD) $(DYN_LINK_FLAGS) -o $@ $(OBJ_DIR)/dltest/crt0-pic.o $(OBJ_DIR)/dltest/main-pic.o $(DYN_LD_STUB) $(LIB_DIR)/libpurec.so
+	$(LD) $(INTERP_EXE_LINK_FLAGS) -o $@ $(OBJ_DIR)/dltest/crt0-pic.o $(OBJ_DIR)/dltest/main-pic.o $(LIB_DIR)/libpurec.so
 endif
 
 -include $(UTIL_OBJECTS:.o=.d)

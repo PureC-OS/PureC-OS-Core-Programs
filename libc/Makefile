@@ -12,16 +12,20 @@ SO_LD_SCRIPT := $(LIBC_DIR)/userspace-so.ld
 CRT0 := $(LIB_DIR)/crt0.o
 LD_OBJ_DIR := $(OBJ_DIR)/ld
 LD_STUB := $(LIB_DIR)/pc-ld.o
-LD_STUB_OBJECTS := $(LD_OBJ_DIR)/ld.o $(LD_OBJ_DIR)/ld_entry.o
+LD_STUB_OBJECTS := $(LD_OBJ_DIR)/ld.o $(LD_OBJ_DIR)/ld_entry.o $(LD_OBJ_DIR)/ld_tls.o
 LD_STUB_CFLAGS := -g -O2 -ffreestanding -fno-builtin -fno-stack-protector -fPIE \
 	-fvisibility=hidden -fno-plt -fno-tree-loop-distribute-patterns -Wa,--noexecstack -m64 -mno-red-zone -mcmodel=small
 
+LD_INTERP := $(LIB_DIR)/ld-purec.so.1
+LD_INTERP_OBJECTS := $(LD_OBJ_DIR)/ld_interp.o $(LD_OBJ_DIR)/ld_interp_entry.o $(LD_OBJ_DIR)/ld_tls.o
+
 .PHONY: all
-all: $(TARGET) $(SO_TARGET) $(CRT0) $(LD_STUB)
+all: $(TARGET) $(SO_TARGET) $(CRT0) $(LD_STUB) $(LD_INTERP)
 
 -include $(OBJECTS:.o=.d)
 -include $(SO_OBJECTS:.o=.d)
 -include $(LD_STUB_OBJECTS:.o=.d)
+-include $(LD_INTERP_OBJECTS:.o=.d)
 
 $(TARGET): $(OBJECTS)
 	@mkdir -p $(@D)
@@ -56,6 +60,12 @@ $(CRT0): $(LIBC_DIR)/crt0.c
 $(LD_STUB): $(LD_STUB_OBJECTS)
 	@mkdir -p $(@D)
 	$(LD) -r -o $@ $^
+
+$(LD_INTERP): $(LD_INTERP_OBJECTS)
+	@mkdir -p $(@D)
+	$(LD) $(INTERP_LINK_FLAGS) -o $@ $^
+
+$(LD_OBJ_DIR)/ld_interp.o: $(LIBC_DIR)/ld/ld.c
 
 $(LD_OBJ_DIR)/%.o: $(LIBC_DIR)/ld/%.c
 	@mkdir -p $(@D)

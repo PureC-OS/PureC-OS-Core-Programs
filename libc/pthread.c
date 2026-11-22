@@ -16,6 +16,11 @@ extern void stdio_prepare(void) __attribute__((weak));
 int __pc_threaded;
 static uintptr_t main_stack_top;
 
+extern size_t __ld_tls_block_size(void) __attribute__((weak));
+extern void *__ld_tls_setup(void *base) __attribute__((weak));
+extern void __ld_tls_teardown(void *tp) __attribute__((weak));
+extern void *__ld_tls_main_tp(void) __attribute__((weak));
+
 static int tls_ready;
 static const void *tls_image;
 static size_t tls_filesz;
@@ -75,11 +80,20 @@ static size_t tls_data_offset(void)
 
 static size_t tls_block_size(void)
 {
+    if (__ld_tls_block_size && __ld_tls_block_size())
+        return __ld_tls_block_size();
     return tls_data_offset() + round_up(sizeof(struct pthread), 64);
 }
 
 static struct pthread *tls_install(uint8_t *base)
 {
+    if (__ld_tls_setup && __ld_tls_block_size && __ld_tls_block_size())
+    {
+        struct pthread *loaded = __ld_tls_setup(base);
+        loaded->self = loaded;
+        loaded->stack_guard = 0x5C0FFEE5A17ULL;
+        return loaded;
+    }
     uint8_t *pointer = base + tls_data_offset();
     if (tls_memsz && tls_filesz)
     {
@@ -97,6 +111,18 @@ void __tls_init_main(const void *image, size_t filesz, size_t memsz,
 {
     if (tls_ready)
         return;
+    if (__ld_tls_main_tp)
+    {
+        struct pthread *inherited = __ld_tls_main_tp();
+        if (inherited)
+        {
+            inherited->tid_word = 1;
+            inherited->ktid = (int32_t)pc_syscall(SYS_GETTID, 0, 0, 0);
+            inherited->map_base = 0;
+            tls_ready = 1;
+            return;
+        }
+    }
     tls_image = image;
     tls_filesz = filesz;
     tls_memsz = memsz;
@@ -236,6 +262,8 @@ void pthread_exit(void *result)
     thread->result = result;
     run_thread_atexit(thread);
     run_key_destructors(thread);
+    if (thread->map_base && __ld_tls_teardown)
+        __ld_tls_teardown(thread);
     if (!thread->map_base)
     {
         for (;;)
