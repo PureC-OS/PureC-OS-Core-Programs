@@ -16,6 +16,7 @@ DESC = {
     "core-tests": "PureC OS kernel and libc test programs",
     "lua": "Lua interpreter",
     "micropython": "MicroPython interpreter",
+    "doom": "Chocolate Doom with the Freedoom Phase 1 IWAD",
 }
 
 CORE = ["init", "sh", "coreutils", "net-tools", "disk-utils", "accounts", "system", "installer", "core-tests"]
@@ -23,6 +24,7 @@ DEPS = {"base": ["init", "sh", "coreutils", "net-tools", "disk-utils", "accounts
 EXTRA = {
     "lua": [("usr/bin/lua", "@lua")],
     "micropython": [("usr/bin/micropython", "@micropython")],
+    "doom": [("usr/bin/doom", "@chocolate-doom"), ("usr/share/doom/freedoom1.wad", "assets/doom/freedoom1.wad")],
 }
 
 
@@ -66,7 +68,7 @@ def main():
             os.remove(os.path.join(args.out, old))
     version = "%s-%s" % (args.version, args.pkgrel)
     built = []
-    for name in CORE + ["lua", "micropython", "base"]:
+    for name in CORE + ["lua", "micropython", "doom", "base"]:
         cmd = [sys.executable, mkpkg, "--name", name, "--version", version, "-o", args.out]
         count = 0
         if name == "base":
