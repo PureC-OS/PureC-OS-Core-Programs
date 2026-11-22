@@ -13,13 +13,14 @@ DESC = {
     "accounts": "PureC OS user identity commands and sudo",
     "system": "PureC OS system information and process utilities",
     "installer": "PureC OS system installer",
+    "monitor": "Graphical system monitor",
     "core-tests": "PureC OS kernel and libc test programs",
     "lua": "Lua interpreter",
     "micropython": "MicroPython interpreter",
     "doom": "Chocolate Doom with the Freedoom Phase 1 IWAD",
 }
 
-CORE = ["init", "sh", "coreutils", "net-tools", "disk-utils", "accounts", "system", "installer", "core-tests"]
+CORE = ["init", "sh", "coreutils", "net-tools", "disk-utils", "accounts", "system", "installer", "core-tests", "monitor"]
 DEPS = {"base": ["init", "sh", "coreutils", "net-tools", "disk-utils", "accounts", "system", "pkg"]}
 EXTRA = {
     "lua": [("usr/bin/lua", "@lua")],

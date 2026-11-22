@@ -1,78 +1,60 @@
-.TH MONITOR 1 "PureC OS"
-.SH NAME
-monitor \- graphical system monitor
-.SH SYNOPSIS
-.B monitor
-.SH DESCRIPTION
-.B monitor
-shows CPU, memory, swap, network, disk and process information read from
-/proc. It has six tabs: Overview, Processes, Resources, Network, Disks and
-Settings. Ctrl+1 to Ctrl+6 switch tabs and Ctrl+Q closes the window.
-.PP
-The Processes tab lists PID, name, user, state, CPU share, resident memory and
-thread count. Click a column header to sort, type in the filter box to narrow the
-list, select a row and use End process (SIGTERM) or Kill (SIGKILL). Both ask for
-confirmation. Processes owned by root are marked with a lock; their buttons are
-disabled unless the monitor runs as root. The kernel enforces the same rule: a
-user may only signal processes of the same uid.
-.PP
-CPU share is the part of the total processor capacity used by the process.
-.SH FILES
-.TP
-.I ~/.config/monitor/monitor.conf
-Settings, one "key = value" per line.
-.TP
-.I /usr/share/monitor/themes/NAME.theme
-Built-in themes.
-.TP
-.I ~/.config/monitor/themes/NAME.theme
-User themes. A user theme with the same name as a built-in one is ignored.
-.SH SETTINGS
-.TP
-theme
-Theme name.
-.TP
-interval_ms
-Update interval, 250 to 5000.
-.TP
-history
-Number of samples in graphs, 30 to 600.
-.TP
-start_tab
-overview, processes, resources, network, disks or settings.
-.TP
-show_system_processes
-true or false.
-.TP
-sort_column
-pid, name, user, state, cpu, memory or threads.
-.TP
-sort_order
-asc or desc.
-.TP
-cpu_view
-cores or combined.
-.TP
-units
-auto, kib or mib.
-.TP
-smooth
-true or false.
-.SH THEME FORMAT
-A theme file has lines of the form "key = value". Colors are written #rrggbb.
-Empty lines and lines starting with # are ignored. Missing keys take the
-Default theme values.
-.PP
-.B name
-is the theme name and
-.B light
-(true or false) tells whether the theme is light, which selects a matching
-toolkit style for buttons and menus.
-.PP
-Color keys: background, surface, surface2, border, foreground,
-foreground_dim, accent, selection, selection_text, warning, danger, success.
-.PP
-Graph gradients, each with _low, _mid and _high: cpu, mem, download, upload.
-For example cpu_low, cpu_mid, cpu_high.
-.SH SEE ALSO
-ps(1), free(1), kill(1)
+NAME
+       monitor - graphical system monitor
+
+SYNOPSIS
+       monitor
+
+DESCRIPTION
+       Shows CPU, memory, swap, network, disk and process information read
+       from /proc. Tabs: Overview, Processes, Resources, Network, Disks and
+       Settings. Ctrl+1 to Ctrl+6 switch tabs, Ctrl+Q closes the window.
+
+       The Processes tab lists PID, name, user, state, CPU share, resident
+       memory and thread count. Click a column header to sort, type in the
+       filter box to narrow the list, select a row and use End process
+       (SIGTERM) or Kill (SIGKILL). Both ask for confirmation. Processes
+       owned by root are marked with a lock; their buttons are disabled
+       unless the monitor runs as root. The kernel enforces the same rule:
+       a user may only signal processes of the same uid, root may signal any.
+       CPU share is the part of the total processor capacity used.
+
+FILES
+       ~/.config/monitor/monitor.conf
+              Settings, one "key = value" per line.
+       /usr/share/monitor/themes/NAME.theme
+              Built-in themes.
+       ~/.config/monitor/themes/NAME.theme
+              User themes. A name already taken by an earlier theme is
+              ignored.
+
+SETTINGS
+       theme                  theme name
+       interval_ms            update interval, 250 to 5000
+       history                samples kept in graphs, 30 to 600
+       start_tab              overview, processes, resources, network,
+                              disks or settings
+       show_system_processes  true or false
+       sort_column            pid, name, user, state, cpu, memory, threads
+       sort_order             asc or desc
+       cpu_view               cores or combined
+       units                  auto, kib or mib
+       smooth                 true or false
+
+THEME FORMAT
+       Lines of the form "key = value". Colors are written #rrggbb. Empty
+       lines and lines starting with # are ignored. Missing keys take the
+       values of the Default theme.
+
+       name     theme name
+       light    true or false; picks a matching light or dark toolkit style
+                for buttons and menus
+
+       Colors: background, surface, surface2, border, foreground,
+       foreground_dim, accent, selection, selection_text, warning, danger,
+       success.
+
+       Graph gradients, each with the suffixes _low, _mid and _high: cpu,
+       mem, download, upload (for example cpu_low, cpu_mid, cpu_high).
+
+SEE ALSO
+       ps(1), free(1), kill(1)

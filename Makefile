@@ -110,6 +110,7 @@ TARGETS := \
  	$(PROGRAM_DIR)/eat \
  	$(PROGRAM_DIR)/cpuinfo \
  	$(PROGRAM_DIR)/hddcheck \
+	$(PROGRAM_DIR)/monitor \
 	$(UTIL_TARGETS)
 
 PORT_TARGETS := $(PROGRAM_DIR)/lua
@@ -151,7 +152,12 @@ SIGN_KEY ?= $(HOME)/.config/purec-pkg/signing.pem
 PKG_DIR := $(ROOT_DIR)/programs/purec-os-pkg
 
 .NOTPARALLEL:
-.PHONY: all ports packages
+.PHONY: all ports packages FORCE
+FORCE:
+
+$(PROGRAM_DIR)/monitor: FORCE
+	$(MAKE) -C $(SRC_DIR)/monitor ROOT_DIR=$(ROOT_DIR)
+
 all: $(TARGETS)
 
 packages: all
