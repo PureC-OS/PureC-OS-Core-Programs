@@ -88,7 +88,7 @@ static void clamp_scroll(void)
 static void update_buttons(void)
 {
     const struct proc_info *p = pt.selected ? sys_find_proc(pt.selected) : NULL;
-    bool ok = p && p->pid > 1 && (!p->locked || g_sys.is_root);
+    bool ok = p && p->pid > 1 && !p->kernel && (!p->locked || g_sys.is_root);
     pg_widget_set_enabled(pt.end_btn, ok);
     pg_widget_set_enabled(pt.kill_btn, ok);
     char text[48];
@@ -310,7 +310,7 @@ static void perform(void *data)
 static void ask(int sig)
 {
     const struct proc_info *p = pt.selected ? sys_find_proc(pt.selected) : NULL;
-    if (!p || p->pid <= 1 || (p->locked && !g_sys.is_root))
+    if (!p || p->pid <= 1 || p->kernel || (p->locked && !g_sys.is_root))
         return;
     pt.pending_sig = sig;
     pt.pending_pid = p->pid;
@@ -363,7 +363,9 @@ struct pg_widget *tab_processes_new(void)
     pt.count = pg_label_new_font("", PGF_SMALL, PG_COLOR_TEXT3);
     pg_widget_set_align(pt.count, PG_ALIGN_FILL, PG_ALIGN_CENTER);
     pg_widget_add(bar, pt.count);
-    pg_widget_add(bar, pg_spacer_new());
+    struct pg_widget *spacer = pg_spacer_new();
+    pg_widget_set_expand(spacer, true, false);
+    pg_widget_add(bar, spacer);
     pt.end_btn = pg_button_new("End process", PG_NO_ICON, PG_BUTTON_SECONDARY);
     pg_widget_on(pt.end_btn, PG_SIGNAL_CLICKED, on_end, NULL);
     pg_widget_add(bar, pt.end_btn);

@@ -27,6 +27,7 @@ struct proc_info {
     char name[40];
     char user[32];
     bool locked;
+    bool kernel;
 };
 
 struct iface_info {

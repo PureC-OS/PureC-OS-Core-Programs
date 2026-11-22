@@ -82,7 +82,7 @@ void graph_draw(struct pg_canvas *c, int x, int y, int w, int h, const struct se
 void bar_draw(struct pg_canvas *c, int x, int y, int w, int h, uint32_t pm, const struct grad *g)
 {
     int r = h / 2;
-    pgc_rrect(c, x, y, w, h, r, g_theme.surface2, 255);
+    pgc_rrect(c, x, y, w, h, r, g_theme.border, 255);
     if (pm > 1000)
         pm = 1000;
     int fw = (int)((uint64_t)w * pm / 1000);

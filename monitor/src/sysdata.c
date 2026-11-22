@@ -319,11 +319,13 @@ static void update_procs(uint32_t dt_ms)
                 p->rss_kb = (uint64_t)atoll(val);
             else if (!strcmp(line, "CpuTime"))
                 p->cpu_ms = (uint64_t)atoll(val);
+            else if (!strcmp(line, "Kernel"))
+                p->kernel = atoi(val) != 0;
         }
         if (!p->pid || !strcmp(p->state, "exited"))
             continue;
-        u_copy(p->user, sizeof(p->user), user_name(p->uid));
-        p->locked = p->uid == 0 || p->pid <= 1;
+        u_copy(p->user, sizeof(p->user), p->kernel ? "kernel" : user_name(p->uid));
+        p->locked = p->kernel || p->uid == 0 || p->pid <= 1;
         bool found;
         uint64_t before = prev_ms_for(p->pid, &found);
         if (found && dt_ms && p->cpu_ms >= before) {

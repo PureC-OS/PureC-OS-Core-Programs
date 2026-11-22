@@ -11,7 +11,7 @@ static void card_fs(struct pg_canvas *c, int x, int y, int w, int h)
     char right[32];
     snprintf(right, sizeof(right), "%d mounted", g_sys.nmounts);
     struct pg_rect in = ui_card(c, x, y, w, h, "Filesystems", right);
-    int rh = 62;
+    int rh = g_sys.nmounts * 62 > in.h ? 50 : 62;
     for (int i = 0; i < g_sys.nmounts; i++) {
         const struct mount_info *m = &g_sys.mounts[i];
         int ry = in.y + i * rh;
@@ -68,13 +68,15 @@ static void draw(struct pg_widget *w, struct pg_canvas *c, void *data)
     pgc_fill(c, r.x, r.y, r.w, r.h, g_theme.background);
     int pad = 16, gap = 14;
     int x = r.x + pad, y = r.y + pad, W = r.w - 2 * pad, H = r.h - 2 * pad;
-    int fh = 40 + g_sys.nmounts * 62 + 8;
-    if (fh > H * 60 / 100)
-        fh = H * 60 / 100;
-    if (fh < 120)
-        fh = 120;
+    int ph = 40 + g_sys.nparts * 34 + 30;
+    if (ph > H / 3)
+        ph = H / 3;
+    int fh = H - ph - gap;
+    if (fh < 120) {
+        fh = H;
+        ph = 0;
+    }
     card_fs(c, x, y, W, fh);
-    int ph = H - fh - gap;
     if (ph > 80)
         card_parts(c, x, y + fh + gap, W, ph);
 }

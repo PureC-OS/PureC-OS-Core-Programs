@@ -58,8 +58,8 @@ static void card_ifaces(struct pg_canvas *c, int x, int y, int w, int h)
         char line[80], rate[40], tot[64], a[32], b[32];
         ui_text(c, PGF_MEDIUM, in.x + 12, ry + 6, f->name, g_theme.foreground);
         if (f->has_ip)
-            snprintf(line, sizeof(line), "%s   %u.%u.%u.%u", f->link ? "Up" : "Down", f->ip & 255u, (f->ip >> 8) & 255u,
-                     (f->ip >> 16) & 255u, (f->ip >> 24) & 255u);
+            snprintf(line, sizeof(line), "%s   %u.%u.%u.%u", f->link ? "Up" : "Down", (f->ip >> 24) & 255u,
+                     (f->ip >> 16) & 255u, (f->ip >> 8) & 255u, f->ip & 255u);
         else
             snprintf(line, sizeof(line), "%s   no address", f->link ? "Up" : "Down");
         ui_text(c, PGF_SMALL, in.x + 12, ry + 8 + pgc_font_h(PGF_MEDIUM), line, f->link ? g_theme.success : g_theme.foreground_dim);
