@@ -1,0 +1,5 @@
+[Desktop Entry]
+Name=System Monitor
+Exec=/usr/bin/monitor
+Icon=monitor
+Type=Application

@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include "pg/pg.h"
 #include "theme.h"
+#include "sysdata.h"
 
 typedef void (*ui_confirm_fn)(void *data);
 
