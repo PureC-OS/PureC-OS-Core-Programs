@@ -88,7 +88,7 @@ static void clamp_scroll(void)
 static void update_buttons(void)
 {
     const struct proc_info *p = pt.selected ? sys_find_proc(pt.selected) : NULL;
-    bool ok = p && (!p->locked || g_sys.is_root);
+    bool ok = p && p->pid > 1 && (!p->locked || g_sys.is_root);
     pg_widget_set_enabled(pt.end_btn, ok);
     pg_widget_set_enabled(pt.kill_btn, ok);
     char text[48];
@@ -310,7 +310,7 @@ static void perform(void *data)
 static void ask(int sig)
 {
     const struct proc_info *p = pt.selected ? sys_find_proc(pt.selected) : NULL;
-    if (!p || (p->locked && !g_sys.is_root))
+    if (!p || p->pid <= 1 || (p->locked && !g_sys.is_root))
         return;
     pt.pending_sig = sig;
     pt.pending_pid = p->pid;
