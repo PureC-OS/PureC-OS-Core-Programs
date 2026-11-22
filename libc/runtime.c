@@ -905,3 +905,15 @@ void pc_exit(int32_t status){
     (void)pc_syscall(SYS_EXIT,(uint64_t)(int64_t)status,0,0);
     for(;;) __asm__ volatile("pause");
 }
+
+int32_t pc_trace_attach(uint32_t pid, uint32_t flags){
+    return (int32_t)pc_syscall(SYS_TRACE_ATTACH, pid, flags, 0);
+}
+
+int32_t pc_trace_read(int32_t id, struct trace_record *buffer, uint32_t max, uint32_t timeout_ms){
+    return (int32_t)syscall5(SYS_TRACE_READ, (uint64_t)(int64_t)id, (uint64_t)(uintptr_t)buffer, max, timeout_ms, 0);
+}
+
+int32_t pc_trace_control(int32_t id, uint32_t op, void *arg){
+    return (int32_t)pc_syscall(SYS_TRACE_CONTROL, (uint64_t)(int64_t)id, op, (uint64_t)(uintptr_t)arg);
+}

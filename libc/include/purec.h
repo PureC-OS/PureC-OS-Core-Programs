@@ -8,6 +8,7 @@
 #include "purec/abi/keyboard.h"
 #include "purec/abi/storage_types.h"
 #include "purec/abi/syscall.h"
+#include "purec/abi/trace.h"
 
 struct pc_display_info {
     uint32_t width;
@@ -195,6 +196,9 @@ int32_t pc_get_root_device(char *buffer, uint32_t capacity);
 int32_t pc_format_custom(const char *device, uint32_t partition_count, const uint64_t *sizes_gb);
 int32_t pc_format_device_ex(const char *device, const char *serial, uint8_t fs_type);
 int32_t pc_disk_io(const char *device, uint64_t lba, void *buffer, uint32_t count, bool write);
+int32_t pc_trace_attach(uint32_t pid, uint32_t flags);
+int32_t pc_trace_read(int32_t id, struct trace_record *buffer, uint32_t max, uint32_t timeout_ms);
+int32_t pc_trace_control(int32_t id, uint32_t op, void *arg);
 int32_t pc_install_start_ex(const char *device, const char *serial, uint8_t fs_type);
 int32_t pc_get_fs_type(char *buffer, uint32_t capacity);
 int32_t pc_ext2_stat(const char *path, struct ext2_stat_info *out);
