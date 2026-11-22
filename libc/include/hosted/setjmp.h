@@ -1,5 +1,5 @@
 #pragma once
-// PureC hosted libc: setjmp. Implemented in src/libc/setjmp.c with plain
+// PureC hosted libc: setjmp. Implemented in libc/setjmp.c with plain
 // GPR save/restore (callee-saved + rsp/rip); no signal mask, no FPU.
 
 #ifdef __cplusplus

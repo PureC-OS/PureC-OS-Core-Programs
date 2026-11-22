@@ -2,12 +2,12 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "../../fs/types/fs_types.h"
-#include "../../drivers/mouse/ps2_mouse.h"
-#include "../../drivers/input/key_event.h"
-#include "../../drivers/input/keyboard.h"
-#include "../../io/storage/storage_types.h"
-#include "../../kernel/syscall/syscall.h"
+#include "purec/abi/fs_types.h"
+#include "purec/abi/mouse.h"
+#include "purec/abi/key_event.h"
+#include "purec/abi/keyboard.h"
+#include "purec/abi/storage_types.h"
+#include "purec/abi/syscall.h"
 
 struct pc_display_info {
     uint32_t width;

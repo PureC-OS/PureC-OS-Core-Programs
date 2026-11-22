@@ -15,7 +15,7 @@ include $(TOP)/py/py.mk
 INC += -I.
 INC += -I$(TOP)
 INC += -I$(BUILD)
-INC += -I$(ROOT_DIR)/src/libc/include/hosted
+INC += -I$(LIBC_DIR)/include/hosted
 
 CFLAGS += $(INC) -Wall -std=gnu99 -g -O1 -ffreestanding -fno-stack-protector -fno-pic -m64 -mno-red-zone -mcmodel=small -DNDEBUG -DPUREC=1
 

@@ -1,0 +1,19 @@
+#pragma once
+#include <stdint.h>
+#include <stdbool.h>
+#include "key_event.h"
+
+enum keyboard_special_key {
+    KEYBOARD_SPECIAL_F1 = 1,
+    KEYBOARD_SPECIAL_F2 = 2,
+    KEYBOARD_SPECIAL_F3 = 3,
+    KEYBOARD_SPECIAL_HOME = 4,
+    KEYBOARD_SPECIAL_END = 5,
+    KEYBOARD_SPECIAL_PAGE_UP = 6,
+    KEYBOARD_SPECIAL_PAGE_DOWN = 7,
+    KEYBOARD_SPECIAL_LEFT = 8,
+    KEYBOARD_SPECIAL_RIGHT = 9,
+    KEYBOARD_SPECIAL_UP = 10,
+    KEYBOARD_SPECIAL_DOWN = 11,
+    KEYBOARD_SPECIAL_DELETE = 12
+};

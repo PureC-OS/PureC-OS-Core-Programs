@@ -1,8 +1,3 @@
-// PureC hosted libc: setjmp/longjmp, raw machine code (no compiler
-// prologue allowed — a C prologue would move rsp and (%rsp) would no
-// longer be the caller's return address). Layout per hosted/setjmp.h:
-// rbx,rbp,r12,r13,r14,r15,rsp,rip. GPRs only: safe under
-// -mgeneral-regs-only, no FPU state involved.
 
     .text
     .globl setjmp
@@ -14,8 +9,6 @@ setjmp:
     mov %r13, 3*8(%rdi)
     mov %r14, 4*8(%rdi)
     mov %r15, 5*8(%rdi)
-    // Caller rsp (above our return address); resume jumps to the saved
-    // rip with exactly this rsp, so the frame matches the setjmp call.
     lea 8(%rsp), %rax
     mov %rax, 6*8(%rdi)
     mov (%rsp), %rax
@@ -26,7 +19,6 @@ setjmp:
     .globl longjmp
     .type longjmp, @function
 longjmp:
-    // Load rip first: restoring rsp invalidates stack-relative access.
     mov 7*8(%rdi), %rcx
     mov %esi, %eax
     test %eax, %eax

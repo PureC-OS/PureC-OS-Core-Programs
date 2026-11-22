@@ -1,6 +1,6 @@
 #pragma once
 // PureC hosted libc: string + memory, phase 1 of the TCC migration
-// foundation. Implemented in src/libc/string.c, no syscalls needed.
+// foundation. Implemented in libc/string.c, no syscalls needed.
 
 #include <stddef.h>
 

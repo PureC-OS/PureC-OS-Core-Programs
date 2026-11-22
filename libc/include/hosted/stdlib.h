@@ -1,7 +1,7 @@
 #pragma once
 // PureC hosted libc: stdlib, phase 1 of the TCC migration foundation.
 // Heap is a free-list allocator over pc_heap_grow arenas (see
-// src/libc/stdlib.c); there is no sbrk shrink, freed blocks coalesce.
+// libc/stdlib.c); there is no sbrk shrink, freed blocks coalesce.
 
 #include <stddef.h>
 

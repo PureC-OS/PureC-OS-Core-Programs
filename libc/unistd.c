@@ -7,7 +7,7 @@
 #include "include/hosted/stdio.h"
 #include "include/hosted/sys/stat.h"
 #include "include/hosted/dirent.h"
-#include "../fs/types/fs_types.h"
+#include "include/purec/abi/fs_types.h"
 #include "include/hosted/sys/mman.h"
 #include "include/purec.h"
 #include <stdarg.h>

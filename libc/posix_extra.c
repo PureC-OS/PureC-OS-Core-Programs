@@ -1,4 +1,4 @@
-#include "../kernel/syscall/syscall.h"
+#include "include/purec/abi/syscall.h"
 #include "include/hosted/errno.h"
 #include "include/hosted/fcntl.h"
 #include "include/hosted/grp.h"

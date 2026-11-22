@@ -1,4 +1,4 @@
-ROOT_DIR ?= $(abspath ../..)
+ROOT_DIR ?= $(abspath ../../..)
 include $(ROOT_DIR)/mk/toolchain.mk
 
 OBJ_DIR := $(BIN_DIR)/obj/libc
@@ -8,7 +8,7 @@ SO_OBJ_DIR := $(OBJ_DIR)/pic
 SO_OBJECTS := $(OBJECTS:$(OBJ_DIR)/%.o=$(SO_OBJ_DIR)/%.o)
 TARGET := $(LIB_DIR)/libpurec.a
 SO_TARGET := $(LIB_DIR)/libpurec.so
-SO_LD_SCRIPT := $(ROOT_DIR)/src/libc/userspace-so.ld
+SO_LD_SCRIPT := $(LIBC_DIR)/userspace-so.ld
 CRT0 := $(LIB_DIR)/crt0.o
 LD_OBJ_DIR := $(OBJ_DIR)/ld
 LD_STUB := $(LIB_DIR)/pc-ld.o
@@ -31,25 +31,25 @@ $(SO_TARGET): $(SO_OBJECTS) $(SO_LD_SCRIPT)
 	@mkdir -p $(@D)
 	$(LD) $(SO_LINK_FLAGS) -soname libpurec.so -T $(SO_LD_SCRIPT) -o $@ $(SO_OBJECTS)
 
-$(OBJ_DIR)/%.o: $(ROOT_DIR)/src/libc/%.c
+$(OBJ_DIR)/%.o: $(LIBC_DIR)/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/%.o: $(ROOT_DIR)/src/libc/%.S
+$(OBJ_DIR)/%.o: $(LIBC_DIR)/%.S
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
-$(SO_OBJ_DIR)/%.o: $(ROOT_DIR)/src/libc/%.c
+$(SO_OBJ_DIR)/%.o: $(LIBC_DIR)/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(USER_SO_CFLAGS) -c $< -o $@
 
-$(SO_OBJ_DIR)/%.o: $(ROOT_DIR)/src/libc/%.S
+$(SO_OBJ_DIR)/%.o: $(LIBC_DIR)/%.S
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(USER_SO_CFLAGS) -c $< -o $@
 
 # Hosted entry point, deliberately NOT archived into libpurec.a (native
 # programs define their own _start). Ported programs link it explicitly.
-$(CRT0): $(ROOT_DIR)/src/libc/crt0.c
+$(CRT0): $(LIBC_DIR)/crt0.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
 
@@ -57,10 +57,10 @@ $(LD_STUB): $(LD_STUB_OBJECTS)
 	@mkdir -p $(@D)
 	$(LD) -r -o $@ $^
 
-$(LD_OBJ_DIR)/%.o: $(ROOT_DIR)/src/libc/ld/%.c
+$(LD_OBJ_DIR)/%.o: $(LIBC_DIR)/ld/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(LD_STUB_CFLAGS) -c $< -o $@
 
-$(LD_OBJ_DIR)/%.o: $(ROOT_DIR)/src/libc/ld/%.S
+$(LD_OBJ_DIR)/%.o: $(LIBC_DIR)/ld/%.S
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(LD_STUB_CFLAGS) -c $< -o $@

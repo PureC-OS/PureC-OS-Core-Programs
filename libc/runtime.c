@@ -1,6 +1,6 @@
 #include "include/purec.h"
-#include "../kernel/syscall/syscall.h"
-#include "../gfx/text.h"
+#include "include/purec/abi/syscall.h"
+#include "include/purec/gfx_text.h"
 
 int64_t pc_syscall(uint64_t number, uint64_t argument1,
                    uint64_t argument2, uint64_t argument3){
