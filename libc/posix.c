@@ -256,7 +256,7 @@ int uname(struct utsname *name)
     memset(name, 0, sizeof(*name));
     strcpy(name->sysname, "PureC");
     strcpy(name->nodename, "purec");
-    strcpy(name->release, "2.0.0");
+    strcpy(name->release, "2.1.0");
     int32_t rfd = pc_file_open("/sys/kernel/release");
     if (rfd >= 0)
     {
