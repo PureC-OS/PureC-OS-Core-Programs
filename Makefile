@@ -74,7 +74,8 @@ UTILS := ls cat cp mv rm mkdir rmdir touch chmod stat find tree du df install re
 	echo pwd env uname whoami id hostname date uptime sleep true false kill ps free which \
 	clear reboot ping man less help cd sudo ip host ss chvt tty fdisk iwxctl blkid mkinitcpio sync
 UTIL_LIB_OBJECTS := $(OBJ_DIR)/utils/lib/common.o $(OBJ_DIR)/utils/lib/pager.o $(OBJ_DIR)/utils/lib/fileops.o
-UTIL_OBJECTS := $(foreach u,$(UTILS),$(OBJ_DIR)/utils/$(u)/$(u).o) $(UTIL_LIB_OBJECTS)
+UTIL_OBJECTS := $(foreach u,$(UTILS),$(OBJ_DIR)/utils/$(u)/$(u).o) $(UTIL_LIB_OBJECTS) $(OBJ_DIR)/utils/trace/trace.o
+TRACELIB_OBJ := $(OBJ_DIR)/tracelib/sysnames.o
 UTIL_TARGETS := $(UTILS:%=$(PROGRAM_DIR)/%)
 PLAIN_OBJECTS := $(PLAIN_SOURCES:%.c=$(OBJ_DIR)/%.o)
 GENERAL_OBJECTS := $(GENERAL_SOURCES:%.c=$(OBJ_DIR)/%.o)
@@ -111,6 +112,8 @@ TARGETS := \
  	$(PROGRAM_DIR)/cpuinfo \
  	$(PROGRAM_DIR)/hddcheck \
 	$(PROGRAM_DIR)/monitor \
+	$(PROGRAM_DIR)/strace \
+	$(PROGRAM_DIR)/trace \
 	$(UTIL_TARGETS)
 
 PORT_TARGETS := $(PROGRAM_DIR)/lua
@@ -229,6 +232,19 @@ $(PROGRAM_DIR)/$(1): $(OBJ_DIR)/utils/$(1)/$(1).o $(UTIL_LIB_OBJECTS) $(LIB_DIR)
 	$(LD) -S -T $(LINKER_SCRIPT) -o $$@ $(LIB_DIR)/crt0.o $(OBJ_DIR)/utils/$(1)/$(1).o $(UTIL_LIB_OBJECTS) $(LIBPUREFS) $(LIBPUREC)
 endef
 $(foreach u,$(UTILS),$(eval $(call UTIL_RULE,$(u))))
+
+-include $(TRACELIB_OBJ:.o=.d)
+
+$(TRACELIB_OBJ): $(SRC_DIR)/tracelib/sysnames.c $(SRC_DIR)/tracelib/sysnames_table.inc
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) -I$(LIBC_DIR)/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
+
+$(PROGRAM_DIR)/trace: $(OBJ_DIR)/utils/trace/trace.o $(TRACELIB_OBJ) $(UTIL_LIB_OBJECTS) $(LIB_DIR)/crt0.o $(LIBPUREFS) $(LIBPUREC) $(LINKER_SCRIPT)
+	@mkdir -p $(@D)
+	$(LD) -S -T $(LINKER_SCRIPT) -o $@ $(LIB_DIR)/crt0.o $(OBJ_DIR)/utils/trace/trace.o $(TRACELIB_OBJ) $(UTIL_LIB_OBJECTS) $(LIBPUREFS) $(LIBPUREC)
+
+$(PROGRAM_DIR)/strace: FORCE $(TRACELIB_OBJ)
+	$(MAKE) -C $(SRC_DIR)/strace ROOT_DIR=$(ROOT_DIR) TRACELIB_OBJ=$(TRACELIB_OBJ)
 
 $(LIBPUREFS):
 	$(MAKE) -C $(ROOT_DIR)/src/libfs

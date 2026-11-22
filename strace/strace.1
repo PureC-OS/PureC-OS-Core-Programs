@@ -1,0 +1,42 @@
+NAME
+       strace - graphical system call tracer
+
+SYNOPSIS
+       strace
+
+DESCRIPTION
+       Shows the system calls of a process tree live, using the kernel
+       tracing facility. Start a command with the entry and Start button, or
+       choose Attach to PID to pick a running process from a list. Kernel
+       threads, PID 1 and the tracer itself cannot be traced, and a normal
+       user can only trace their own processes. Forked children are followed
+       and shown as nested nodes.
+
+       The main area is a tree. Every process is a node with its PID, name,
+       state and counters; click it, or press Left and Right, to collapse
+       or expand it. Under a node are its system calls, with decoded
+       arguments, the result (errors in red with the error name) and the
+       duration (slow calls in yellow), and the nodes of its child processes.
+       Autoscroll keeps the newest rows in view and switches off when you
+       scroll up. At most 50000 rows are kept, the oldest are dropped.
+
+       The Details tab shows all arguments of the selected call, raw and
+       decoded, the string argument, result, duration and kernel timestamp.
+       The Statistics tab draws a bar chart of the calls of the selected
+       process; the red part of a bar is failed calls.
+
+       Toolbar:
+           Pause     freeze the display; events are still collected
+           Detach    stop tracing, the processes keep running
+           Clear     detach and remove all rows
+           Filter    show only calls whose name or string contains the text
+           Breakpoints
+                     choose system calls at whose entry the process stops
+           Continue  resume a stopped process (F5)
+           Step      resume and stop at the next system call (F10)
+
+       A stopped process is highlighted and its call has not run yet.
+       Ctrl+Q closes the window and detaches.
+
+SEE ALSO
+       trace(1), ps(1)

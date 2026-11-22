@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Syscall Tracer
+Exec=/usr/bin/strace
+IconColor=0xE8A33D
+IconText=#
+Type=Application
