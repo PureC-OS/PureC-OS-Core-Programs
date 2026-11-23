@@ -15,7 +15,7 @@ __asm__(
     ".global __purec_sigreturn\n"
     "__purec_sigreturn:\n"
     "    movl $338, %eax\n"
-    "    int $0x80\n"
+    "    syscall\n"
     "    hlt\n");
 
 int sigaction(int signum, const struct sigaction *action,

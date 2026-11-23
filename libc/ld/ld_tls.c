@@ -1,3 +1,4 @@
+#include "../include/purec/sysasm.h"
 #include <stddef.h>
 #include <stdint.h>
 #include "ld_tls.h"
@@ -46,12 +47,7 @@ static size_t dtv_cap = LD_TLS_DTV_INLINE;
 
 static int64_t tls_sys3(uint64_t number, uint64_t a, uint64_t b, uint64_t c)
 {
-  int64_t result;
-  __asm__ volatile("int $0x80"
-                   : "=a"(result)
-                   : "a"(number), "b"(a), "c"(b), "d"(c)
-                   : "r10", "r8", "memory");
-  return result;
+    return __pc_syscall6(number, a, b, c, 0, 0, 0);
 }
 
 static size_t round_up(size_t value, size_t alignment)

@@ -1,3 +1,4 @@
+#include "../include/purec/sysasm.h"
 #include <stddef.h>
 #include <stdint.h>
 #include "ld_tls.h"
@@ -187,12 +188,7 @@ static uint64_t arena_left;
 
 static int64_t sys3(uint64_t number, uint64_t a, uint64_t b, uint64_t c)
 {
-  int64_t result;
-  __asm__ volatile("int $0x80"
-                   : "=a"(result)
-                   : "a"(number), "b"(a), "c"(b), "d"(c)
-                   : "r10", "r8", "memory");
-  return result;
+    return __pc_syscall6(number, a, b, c, 0, 0, 0);
 }
 
 struct mmap_req { uint64_t address, length, prot, flags; };

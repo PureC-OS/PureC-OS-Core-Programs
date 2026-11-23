@@ -1,3 +1,4 @@
+#include "include/purec/sysasm.h"
 #include "include/purec/abi/syscall.h"
 #include "include/hosted/errno.h"
 #include "include/hosted/sys/epoll.h"
@@ -14,13 +15,7 @@ static int64_t syscall_four(uint64_t number, uint64_t argument1,
                             uint64_t argument2, uint64_t argument3,
                             uint64_t argument4)
 {
-    int64_t result;
-    __asm__ volatile("int $0x80"
-                     : "=a"(result)
-                     : "a"(number), "b"(argument1), "c"(argument2),
-                       "d"(argument3), "S"(argument4)
-                     : "r10", "r8", "memory");
-    return result;
+    return __pc_syscall6(number, argument1, argument2, argument3, argument4, 0, 0);
 }
 
 static int result_of(int64_t value)

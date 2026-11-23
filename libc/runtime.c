@@ -1,31 +1,17 @@
+#include "include/purec/sysasm.h"
 #include "include/purec.h"
 #include "include/purec/abi/syscall.h"
 #include "include/purec/gfx_text.h"
 
 int64_t pc_syscall(uint64_t number, uint64_t argument1,
                    uint64_t argument2, uint64_t argument3){
-    int64_t result;
-    __asm__ volatile(
-        "int $0x80"
-        : "=a"(result)
-        : "a"(number),"b"(argument1),"c"(argument2),"d"(argument3)
-        : "r10","r8","memory"
-    );
-    return result;
+    return __pc_syscall6(number, argument1, argument2, argument3, 0, 0, 0);
 }
 
 static int64_t syscall5(uint64_t number, uint64_t argument1,
                         uint64_t argument2, uint64_t argument3,
                         uint64_t argument4, uint64_t argument5){
-    int64_t result;
-    __asm__ volatile(
-        "int $0x80"
-        : "=a"(result)
-        : "a"(number),"b"(argument1),"c"(argument2),"d"(argument3),
-          "S"(argument4),"D"(argument5)
-        : "r10","r8","memory"
-    );
-    return result;
+    return __pc_syscall6(number, argument1, argument2, argument3, argument4, argument5, 0);
 }
 
 uint32_t pc_strlen(const char *text){

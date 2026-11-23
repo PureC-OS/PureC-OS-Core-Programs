@@ -1,3 +1,4 @@
+#include "include/purec/sysasm.h"
 #include "include/hosted/pthread.h"
 #include "include/hosted/semaphore.h"
 #include "include/hosted/errno.h"
@@ -35,12 +36,7 @@ static int main_atexit_registered;
 static int64_t sys4(uint64_t number, uint64_t a, uint64_t b, uint64_t c,
                     uint64_t d)
 {
-    int64_t result;
-    __asm__ volatile("int $0x80"
-                     : "=a"(result)
-                     : "a"(number), "b"(a), "c"(b), "d"(c), "S"(d)
-                     : "r10", "r8", "memory");
-    return result;
+    return __pc_syscall6(number, a, b, c, d, 0, 0);
 }
 
 static inline struct pthread *thread_pointer(void)
