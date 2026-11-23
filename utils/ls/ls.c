@@ -138,6 +138,14 @@ static void print_long(struct entry *list, int n)
         format_time(tbuf, sizeof(tbuf), e->st.st_mtime);
         printf("%s%s%s ", color ? C_BLUE : "", tbuf, color ? C_RESET : "");
         print_name(e);
+        if (S_ISLNK(e->st.st_mode) && e->path) {
+            char target[UTIL_PATH];
+            ssize_t got = readlink(e->path, target, sizeof(target) - 1);
+            if (got >= 0) {
+                target[got] = 0;
+                printf(" -> %s", target);
+            }
+        }
         putchar('\n');
     }
     (void)total;
@@ -251,7 +259,7 @@ static void list_directory(const char *path, bool header, bool *first)
         char full[UTIL_PATH];
         util_join(full, sizeof(full), path, name);
         e->path = strdup(full);
-        e->ok = stat(full, &e->st) == 0;
+        e->ok = lstat(full, &e->st) == 0;
         if (!e->ok) {
             memset(&e->st, 0, sizeof(e->st));
             e->st.st_mode = d->d_type == DT_DIR ? S_IFDIR : S_IFREG;
@@ -343,7 +351,8 @@ int main(int argc, char **argv)
     struct entry *dirs = calloc((size_t)o.count, sizeof(struct entry));
     for (int i = 0; i < o.count; i++) {
         struct stat st;
-        if (stat(o.operands[i], &st) != 0) {
+        int got = (opt_long || opt_dirself || opt_classify) ? lstat(o.operands[i], &st) : stat(o.operands[i], &st);
+        if (got != 0) {
             util_err("cannot access '%s': %s", o.operands[i], strerror(errno));
             status = 2;
             continue;

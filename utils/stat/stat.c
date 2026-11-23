@@ -56,14 +56,15 @@ int main(int argc, char **argv)
     struct opts o;
     opts_begin(&o, argc, argv);
     const char *format = NULL;
-    bool terse = false;
+    bool terse = false, deref = false;
     int c;
     while ((c = opts_next(&o, "c:tL")) != -1) {
         if (c == 'c') format = o.arg;
         else if (c == 't') terse = true;
-        else if (c == 'L' && !o.name) continue;
+        else if (c == 'L' && !o.name) deref = true;
+        else if (c == 'L' && opts_long(&o, "dereference")) deref = true;
         else if (c == 'L' && opts_long(&o, "format")) format = o.value;
-        else if (c == 'L' && opts_long(&o, "help")) { util_usage("[-t] [-c FORMAT] FILE..."); return 0; }
+        else if (c == 'L' && opts_long(&o, "help")) { util_usage("[-Lt] [-c FORMAT] FILE..."); return 0; }
         else return util_bad_option(&o, c);
     }
     if (!o.count) return util_err("missing operand");
@@ -71,7 +72,7 @@ int main(int argc, char **argv)
     int rc = 0;
     for (int i = 0; i < o.count; i++) {
         struct stat st;
-        if (stat(o.operands[i], &st) != 0) {
+        if ((deref ? stat(o.operands[i], &st) : lstat(o.operands[i], &st)) != 0) {
             rc = util_err("cannot stat '%s': %s", o.operands[i], strerror(errno));
             continue;
         }
@@ -84,7 +85,14 @@ int main(int argc, char **argv)
         char mode[11], ub[64], gb[64], hb[32];
         util_mode_string(st.st_mode, mode);
         util_human(hb, sizeof(hb), (unsigned long long)st.st_size);
-        printf("%s  File:%s %s\n", color ? C_BOLD : "", color ? C_RESET : "", o.operands[i]);
+        char target[UTIL_PATH];
+        ssize_t tl = S_ISLNK(st.st_mode) ? readlink(o.operands[i], target, sizeof(target) - 1) : -1;
+        if (tl >= 0) {
+            target[tl] = 0;
+            printf("%s  File:%s %s -> %s\n", color ? C_BOLD : "", color ? C_RESET : "", o.operands[i], target);
+        } else {
+            printf("%s  File:%s %s\n", color ? C_BOLD : "", color ? C_RESET : "", o.operands[i]);
+        }
         printf("%s  Size:%s %-12lld %s(%s)%s  %s\n", color ? C_BOLD : "", color ? C_RESET : "", (long long)st.st_size,
                color ? C_GRAY : "", hb, color ? C_RESET : "", kind(st.st_mode));
         printf("%s Inode:%s %-12lu %sLinks:%s %lu\n", color ? C_BOLD : "", color ? C_RESET : "", (unsigned long)st.st_ino,
