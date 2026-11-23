@@ -405,21 +405,45 @@ int truncate(const char *path, off_t length)
     return result;
 }
 
+int __purec_fs_errno(int32_t status, int fallback);
+const char *__purec_abs_path(const char *path, char *out, size_t capacity);
+
 ssize_t readlink(const char *path, char *buffer, size_t size)
 {
-    (void)path;
-    (void)buffer;
-    (void)size;
-    errno = EINVAL;
-    return -1;
+    if (!path || !buffer || !size)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    char abs[512];
+    path = __purec_abs_path(path, abs, sizeof(abs));
+    if (size > 4096)
+        size = 4096;
+    int32_t status = pc_readlink(path, buffer, (uint32_t)size);
+    if (status < 0)
+    {
+        errno = __purec_fs_errno(status, EINVAL);
+        return -1;
+    }
+    return (ssize_t)status;
 }
 
 int symlink(const char *target, const char *path)
 {
-    (void)target;
-    (void)path;
-    errno = EPERM;
-    return -1;
+    if (!target || !path || !target[0] || !path[0])
+    {
+        errno = !target || !path ? EINVAL : ENOENT;
+        return -1;
+    }
+    char abs[512];
+    path = __purec_abs_path(path, abs, sizeof(abs));
+    int32_t status = pc_symlink(target, path);
+    if (status < 0)
+    {
+        errno = status == -8 ? EPERM : __purec_fs_errno(status, EIO);
+        return -1;
+    }
+    return 0;
 }
 
 int chown(const char *path, uid_t owner, gid_t group)

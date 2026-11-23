@@ -429,6 +429,21 @@ int32_t pc_file_stat_ex(const char *path, struct file_stat_ex *out){
         (uint64_t)(uintptr_t)out,0);
 }
 
+int32_t pc_file_lstat_ex(const char *path, struct file_stat_ex *out){
+    return (int32_t)pc_syscall(SYS_LSTAT_EX,(uint64_t)(uintptr_t)path,
+        (uint64_t)(uintptr_t)out,0);
+}
+
+int32_t pc_readlink(const char *path, char *buffer, uint32_t size){
+    return (int32_t)pc_syscall(SYS_READLINK,(uint64_t)(uintptr_t)path,
+        (uint64_t)(uintptr_t)buffer,size);
+}
+
+int32_t pc_symlink(const char *target, const char *path){
+    return (int32_t)pc_syscall(SYS_SYMLINK,(uint64_t)(uintptr_t)target,
+        (uint64_t)(uintptr_t)path,0);
+}
+
 int32_t pc_getrandom(void *buffer, uint32_t count){
     return (int32_t)pc_syscall(SYS_GETRANDOM,(uint64_t)(uintptr_t)buffer,count,0);
 }

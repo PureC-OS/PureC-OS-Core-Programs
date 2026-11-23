@@ -16,6 +16,8 @@
 #include <stdint.h>
 int __purec_fs_errno(int32_t status, int fallback);
 
+static char *lexical_path(const char *path, char *resolved);
+
 static const char *resolve_user_path(const char *path, char *buf, size_t cap)
 {
     (void)cap;
@@ -24,7 +26,7 @@ static const char *resolve_user_path(const char *path, char *buf, size_t cap)
         return path;
     if (!buf)
         return path;
-    if (!realpath(path, buf))
+    if (!lexical_path(path, buf))
         return path;
     return buf;
 }
@@ -229,7 +231,8 @@ static void fill_stat_ex(struct stat *info, const struct file_stat_ex *raw)
 {
     memset(info, 0, sizeof(*info));
     info->st_size = raw->size;
-    info->st_mode = (raw->is_directory ? S_IFDIR : S_IFREG) | (raw->mode & 07777);
+    info->st_mode = ((raw->flags & FILE_STAT_FLAG_SYMLINK) ? S_IFLNK
+                     : raw->is_directory ? S_IFDIR : S_IFREG) | (raw->mode & 07777);
     info->st_uid = raw->uid;
     info->st_gid = raw->gid;
     info->st_atime = (long)raw->atime;
@@ -602,6 +605,7 @@ int __purec_fs_errno(int32_t status, int fallback)
     case -9: return EBUSY;
     case -3: return EINVAL;
     case -1: return EIO;
+    case -15: return ELOOP;
     }
     return fallback;
 }
@@ -686,7 +690,27 @@ int fstat(int fd, struct stat *info)
 
 int lstat(const char *path, struct stat *info)
 {
-    return stat(path, info);
+    if (!path || !info)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    char abs[512];
+    path = resolve_user_path(path, abs, sizeof(abs));
+    struct file_stat_ex extended;
+    int32_t status = pc_file_lstat_ex(path, &extended);
+    if (status < 0)
+    {
+        if (status == -2 || status == -15 || status == -14 || status == -7)
+        {
+            errno = __purec_fs_errno(status, ENOENT);
+            return -1;
+        }
+        return stat(path, info);
+    }
+    fill_stat_ex(info, &extended);
+    fill_identity(info, path);
+    return 0;
 }
 
 int unlink(const char *path)
@@ -1030,7 +1054,7 @@ void assert_fail(const char *expression, const char *file, int line)
     pc_exit(134);
 }
 
-char *realpath(const char *path, char *resolved)
+static char *lexical_path(const char *path, char *resolved)
 {
     if (!path || !path[0])
     {
@@ -1118,6 +1142,74 @@ char *realpath(const char *path, char *resolved)
     if (!fresh)
         return 0;
     memcpy(fresh, out, w + 1);
+    return fresh;
+}
+
+const char *__purec_abs_path(const char *path, char *out, size_t capacity)
+{
+    return resolve_user_path(path, out, capacity);
+}
+
+char *realpath(const char *path, char *resolved)
+{
+    char current[512];
+    if (!lexical_path(path, current))
+        return 0;
+    for (int hops = 0;; hops++)
+    {
+        size_t length = strlen(current);
+        size_t end = 1;
+        bool spliced = false;
+        while (end <= length && !spliced)
+        {
+            while (end < length && current[end] != '/')
+                end++;
+            char prefix[512];
+            memcpy(prefix, current, end);
+            prefix[end] = '\0';
+            char target[512];
+            int32_t got = end > 1 ? pc_readlink(prefix, target, sizeof(target) - 1) : -3;
+            if (got > 0)
+            {
+                if (hops >= 40)
+                {
+                    errno = ELOOP;
+                    return 0;
+                }
+                target[got] = '\0';
+                char joined[1100];
+                size_t base = end;
+                while (base > 0 && current[base - 1] != '/')
+                    base--;
+                if (target[0] == '/')
+                    snprintf(joined, sizeof(joined), "%s%s", target, current + end);
+                else
+                    snprintf(joined, sizeof(joined), "%.*s%s%s", (int)base, current, target, current + end);
+                if (strlen(joined) >= sizeof(current) || !lexical_path(joined, current))
+                {
+                    errno = ENAMETOOLONG;
+                    return 0;
+                }
+                spliced = true;
+            }
+            else if (got < 0 && got != -3)
+            {
+                break;
+            }
+            end++;
+        }
+        if (!spliced)
+            break;
+    }
+    size_t size = strlen(current) + 1;
+    if (resolved)
+    {
+        memcpy(resolved, current, size);
+        return resolved;
+    }
+    char *fresh = (char *)malloc(size);
+    if (fresh)
+        memcpy(fresh, current, size);
     return fresh;
 }
 
