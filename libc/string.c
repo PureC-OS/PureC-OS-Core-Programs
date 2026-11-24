@@ -225,6 +225,7 @@ char *strerror(int code) {
         case ERANGE: return "Math result not representable";
         case ENOSYS: return "Function not implemented";
         case ENOTEMPTY: return "Directory not empty";
+        case ELOOP: return "Too many levels of symbolic links";
         default: return "Unknown error";
     }
 }

@@ -39,7 +39,7 @@ int main(int argc, char **argv)
             continue;
         }
         struct stat st;
-        if (stat(path, &st) != 0) {
+        if (lstat(path, &st) != 0) {
             if (!force) rc = util_err("cannot remove '%s': %s", path, strerror(errno));
             continue;
         }

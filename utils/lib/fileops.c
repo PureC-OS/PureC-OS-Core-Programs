@@ -77,7 +77,7 @@ int fo_copy_tree(const char *from, const char *to, bool preserve, bool verbose, 
 int fo_remove_tree(const char *path, bool verbose, bool force)
 {
     struct stat st;
-    if (stat(path, &st) != 0) {
+    if (lstat(path, &st) != 0) {
         if (force) return 0;
         return util_err("cannot remove '%s': %s", path, strerror(errno));
     }
