@@ -1403,10 +1403,19 @@ static uint64_t dl_main(uint64_t *frame, const Phdr *ph, uint16_t phnum, uint64_
   if (argc > 0 && argc < 0x10000)
   {
     env_vector = (const char *const *)(frame + 2 + argc + 1);
-    library_path_env = env_lookup("LD_LIBRARY_PATH");
+    int secure = 0;
+    {
+      const uint64_t *aux = (const uint64_t *)env_vector;
+      while (*aux)
+        aux++;
+      for (aux++; aux[0]; aux += 2)
+        if (aux[0] == 23 && aux[1])
+          secure = 1;
+    }
+    library_path_env = secure ? 0 : env_lookup("LD_LIBRARY_PATH");
     if (env_lookup("LD_BIND_NOW"))
       force_now = 1;
-    const char *dbg = env_lookup("LD_DEBUG");
+    const char *dbg = secure ? 0 : env_lookup("LD_DEBUG");
     if (dbg)
     {
       for (const char *c = dbg; *c; c++)
@@ -1415,7 +1424,7 @@ static uint64_t dl_main(uint64_t *frame, const Phdr *ph, uint16_t phnum, uint64_
       if (dbg[0] == 'a' && dbg[1] == 'l' && dbg[2] == 'l')
         debug_libs = 1;
     }
-    const char *tr = env_lookup("LD_TRACE_LOADED_OBJECTS");
+    const char *tr = secure ? 0 : env_lookup("LD_TRACE_LOADED_OBJECTS");
     if (tr && *tr && !(tr[0] == '0' && !tr[1]))
       trace_mode = 1;
   }

@@ -28,9 +28,60 @@ mode_t umask(mode_t mask)
 }
 
 uid_t getuid(void) { return (uid_t)pc_getuid(); }
-uid_t geteuid(void) { return (uid_t)pc_getuid(); }
+uid_t geteuid(void) { return (uid_t)pc_syscall(SYS_GETEUID, 0, 0, 0); }
 gid_t getgid(void) { return (gid_t)pc_syscall(SYS_GETGID, 0, 0, 0); }
-gid_t getegid(void) { return getgid(); }
+gid_t getegid(void) { return (gid_t)pc_syscall(SYS_GETEGID, 0, 0, 0); }
+
+static int id_result(int64_t result)
+{
+    if (result < 0)
+    {
+        errno = EPERM;
+        return -1;
+    }
+    return 0;
+}
+
+int setuid(uid_t uid) { return id_result(pc_syscall(SYS_SETUID, uid, 0, 0)); }
+int setgid(gid_t gid) { return id_result(pc_syscall(SYS_SETGID, gid, 0, 0)); }
+int seteuid(uid_t uid) { return setresuid((uid_t)-1, uid, (uid_t)-1); }
+int setegid(gid_t gid) { return setresgid((gid_t)-1, gid, (gid_t)-1); }
+
+int setresuid(uid_t ruid, uid_t euid, uid_t suid)
+{
+    return id_result(pc_syscall(SYS_SETRESUID, ruid, euid, suid));
+}
+
+int setresgid(gid_t rgid, gid_t egid, gid_t sgid)
+{
+    return id_result(pc_syscall(SYS_SETRESGID, rgid, egid, sgid));
+}
+
+int getresuid(uid_t *ruid, uid_t *euid, uid_t *suid)
+{
+    uint32_t value[3];
+    if (id_result(pc_syscall(SYS_GETRESUID, (uint64_t)(uintptr_t)&value[0],
+                             (uint64_t)(uintptr_t)&value[1],
+                             (uint64_t)(uintptr_t)&value[2])) < 0)
+        return -1;
+    *ruid = value[0];
+    *euid = value[1];
+    *suid = value[2];
+    return 0;
+}
+
+int getresgid(gid_t *rgid, gid_t *egid, gid_t *sgid)
+{
+    uint32_t value[3];
+    if (id_result(pc_syscall(SYS_GETRESGID, (uint64_t)(uintptr_t)&value[0],
+                             (uint64_t)(uintptr_t)&value[1],
+                             (uint64_t)(uintptr_t)&value[2])) < 0)
+        return -1;
+    *rgid = value[0];
+    *egid = value[1];
+    *sgid = value[2];
+    return 0;
+}
 
 pid_t vfork(void) { return fork(); }
 
@@ -176,7 +227,8 @@ char *getpass(const char *prompt)
         write(own ? fd : 2, prompt, strlen(prompt));
     struct termios saved, quiet;
     bool raw = tcgetattr(fd, &saved) == 0;
-    if (raw) {
+    if (raw)
+    {
         quiet = saved;
         quiet.c_lflag &= ~(tcflag_t)ECHO;
         tcsetattr(fd, TCSAFLUSH, &quiet);
