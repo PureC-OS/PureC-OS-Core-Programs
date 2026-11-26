@@ -17,6 +17,7 @@
 
 #define SUDO_VERSION "1.0"
 #define DEFAULT_PATH "/usr/bin:/bin:/usr/sbin:/sbin"
+#define PASSWORD_BUFFER 512
 #define TS_MAGIC "PCSUDO1"
 
 struct options {
@@ -57,55 +58,55 @@ static void wipe(char *p, size_t n)
         *v++ = 0;
 }
 
-static const char *timestamp_directory(void)
+static char *timestamp_directory(void)
 {
-    static char directory[64];
     static const char *const bases[] = {"/run", "/var/run", NULL};
-    if (directory[0])
-        return directory;
     for (int i = 0; bases[i]; i++) {
         struct stat info;
         if (stat(bases[i], &info) != 0 || !S_ISDIR(info.st_mode))
             continue;
-        char step[64];
-        snprintf(step, sizeof(step), "%s/sudo", bases[i]);
-        if (mkdir(step, 0700) != 0 && errno != EEXIST)
+        char *step = sudoers_format("%s/sudo", bases[i]);
+        int made = mkdir(step, 0700) != 0 && errno != EEXIST;
+        free(step);
+        if (made)
             continue;
-        snprintf(step, sizeof(step), "%s/sudo/ts", bases[i]);
-        if (mkdir(step, 0700) != 0 && errno != EEXIST)
+        step = sudoers_format("%s/sudo/ts", bases[i]);
+        made = mkdir(step, 0700) != 0 && errno != EEXIST;
+        if (made) {
+            free(step);
             continue;
-        snprintf(directory, sizeof(directory), "%s", step);
-        return directory;
+        }
+        return step;
     }
     return NULL;
 }
 
-static void terminal_id(char *out, size_t capacity)
+static char *terminal_id(void)
 {
     const char *name = ttyname(0);
     if (!name)
         name = ttyname(1);
     if (!name)
         name = ttyname(2);
-    if (!name) {
-        snprintf(out, capacity, "ppid%d", (int)getppid());
-        return;
-    }
-    size_t n = 0;
-    for (; *name && n + 1 < capacity; name++)
-        out[n++] = *name == '/' ? '_' : *name;
-    out[n] = 0;
+    if (!name)
+        return sudoers_format("ppid%d", (int)getppid());
+    char *id = sudoers_xdup(name);
+    for (char *c = id; *c; c++)
+        if (*c == '/')
+            *c = '_';
+    return id;
 }
 
-static bool timestamp_path(const char *user, char *out, size_t capacity)
+static char *timestamp_path(const char *user)
 {
-    const char *directory = timestamp_directory();
+    char *directory = timestamp_directory();
     if (!directory)
-        return false;
-    char tty[96];
-    terminal_id(tty, sizeof(tty));
-    snprintf(out, capacity, "%s/%s.%s", directory, user, tty);
-    return true;
+        return NULL;
+    char *tty = terminal_id();
+    char *path = sudoers_format("%s/%s.%s", directory, user, tty);
+    free(directory);
+    free(tty);
+    return path;
 }
 
 static long monotonic_seconds(void)
@@ -118,13 +119,16 @@ static long monotonic_seconds(void)
 
 static bool timestamp_valid(const char *user, int timeout_minutes)
 {
-    char path[200];
-    if (timeout_minutes <= 0 || !timestamp_path(user, path, sizeof(path)))
+    if (timeout_minutes <= 0)
+        return false;
+    char *path = timestamp_path(user);
+    if (!path)
         return false;
     struct stat info;
-    if (stat(path, &info) != 0 || info.st_uid != 0 || (info.st_mode & 077))
-        return false;
-    int fd = open(path, O_RDONLY);
+    int fd = -1;
+    if (stat(path, &info) == 0 && info.st_uid == 0 && !(info.st_mode & 077))
+        fd = open(path, O_RDONLY);
+    free(path);
     if (fd < 0)
         return false;
     char text[64];
@@ -142,87 +146,93 @@ static bool timestamp_valid(const char *user, int timeout_minutes)
 
 static void timestamp_update(const char *user)
 {
-    char path[200];
-    if (!timestamp_path(user, path, sizeof(path)))
+    char *path = timestamp_path(user);
+    if (!path)
         return;
     unlink(path);
     int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
-    if (fd < 0)
-        return;
-    char text[64];
-    int length = snprintf(text, sizeof(text), TS_MAGIC "\n%ld\n", monotonic_seconds());
-    if (write(fd, text, (size_t)length) < 0) {
+    if (fd >= 0) {
+        char text[64];
+        int length = snprintf(text, sizeof(text), TS_MAGIC "\n%ld\n", monotonic_seconds());
+        if (write(fd, text, (size_t)length) < 0)
+            unlink(path);
         close(fd);
-        return;
+        chmod(path, 0600);
     }
-    close(fd);
-    chmod(path, 0600);
+    free(path);
 }
 
 static void timestamp_remove(const char *user)
 {
-    char path[200];
-    if (timestamp_path(user, path, sizeof(path)))
+    char *path = timestamp_path(user);
+    if (path)
         unlink(path);
+    free(path);
 }
 
 static void timestamp_remove_all(const char *user)
 {
-    const char *directory = timestamp_directory();
+    char *directory = timestamp_directory();
     if (!directory)
         return;
     DIR *dir = opendir(directory);
-    if (!dir)
-        return;
-    size_t length = strlen(user);
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (strncmp(entry->d_name, user, length) == 0 && entry->d_name[length] == '.') {
-            char path[300];
-            snprintf(path, sizeof(path), "%s/%s", directory, entry->d_name);
-            unlink(path);
+    if (dir) {
+        size_t length = strlen(user);
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (strncmp(entry->d_name, user, length) == 0 && entry->d_name[length] == '.') {
+                char *path = sudoers_format("%s/%s", directory, entry->d_name);
+                unlink(path);
+                free(path);
+            }
         }
+        closedir(dir);
     }
-    closedir(dir);
+    free(directory);
 }
 
-static bool shadow_hash(const char *user, char *out, size_t capacity)
+static char *shadow_hash(const char *user)
 {
     int fd = open("/etc/shadow", O_RDONLY);
     if (fd < 0)
-        return false;
-    static char buffer[16384];
+        return NULL;
+    size_t capacity = 4096;
     size_t length = 0;
+    char *buffer = sudoers_xalloc(capacity);
     for (;;) {
-        ssize_t got = read(fd, buffer + length, sizeof(buffer) - 1 - length);
+        if (length + 1 >= capacity) {
+            capacity *= 2;
+            buffer = sudoers_xrealloc(buffer, capacity);
+        }
+        ssize_t got = read(fd, buffer + length, capacity - length - 1);
         if (got <= 0)
             break;
         length += (size_t)got;
-        if (length + 1 >= sizeof(buffer))
-            break;
     }
     close(fd);
     buffer[length] = 0;
     size_t name_length = strlen(user);
+    char *result = NULL;
     for (char *line = buffer; *line;) {
         char *next = strchr(line, '\n');
         if (strncmp(line, user, name_length) == 0 && line[name_length] == ':') {
             const char *hash = line + name_length + 1;
             size_t n = 0;
-            while (hash[n] && hash[n] != ':' && hash[n] != '\n') {
-                if (n + 1 >= capacity)
-                    return false;
-                out[n] = hash[n];
+            while (hash[n] && hash[n] != ':' && hash[n] != '\n')
                 n++;
+            if (n) {
+                result = sudoers_xalloc(n + 1);
+                memcpy(result, hash, n);
             }
-            out[n] = 0;
-            return n > 0;
+            break;
         }
         if (!next)
             break;
         line = next + 1;
     }
-    return false;
+    wipe(buffer, capacity);
+    free(buffer);
+    return result;
 }
 
 static int read_password(const char *prompt, char *out, size_t capacity)
@@ -263,21 +273,23 @@ static int read_password(const char *prompt, char *out, size_t capacity)
 
 static bool password_ok(const char *user, const char *password)
 {
-    char hash[PURECRYPT_HASH_MAX];
-    if (!shadow_hash(user, hash, sizeof(hash)))
+    char *hash = shadow_hash(user);
+    if (!hash)
         return false;
-    if (hash[0] != '$' || hash[1] != '6' || hash[2] != '$')
-        return false;
-    return purecrypt_verify(password, hash) == 1;
+    bool ok = hash[0] == '$' && hash[1] == '6' && hash[2] == '$' &&
+              purecrypt_verify(password, hash) == 1;
+    free(hash);
+    return ok;
 }
 
 static int authenticate(const char *auth_user, int tries)
 {
     for (int attempt = 0; attempt < tries; attempt++) {
-        char prompt[128];
-        char password[256];
-        snprintf(prompt, sizeof(prompt), "[sudo] password for %s: ", auth_user);
-        if (read_password(prompt, password, sizeof(password)) != 0) {
+        char password[PASSWORD_BUFFER];
+        char *prompt = sudoers_format("[sudo] password for %s: ", auth_user);
+        int read_status = read_password(prompt, password, sizeof(password));
+        free(prompt);
+        if (read_status != 0) {
             wipe(password, sizeof(password));
             fputs("sudo: no password was provided\n", stderr);
             fprintf(stderr, "sudo: %d incorrect password attempt%s\n", attempt + 1,
@@ -306,31 +318,16 @@ static bool pattern_in(const char *const *patterns, const char *name)
 static void env_put(char ***env, int *count, const char *name, const char *value)
 {
     size_t name_length = strlen(name);
+    char *entry = sudoers_format("%s=%s", name, value);
     for (int i = 0; i < *count; i++) {
         if (strncmp((*env)[i], name, name_length) == 0 && (*env)[i][name_length] == '=') {
             free((*env)[i]);
-            goto set;
+            (*env)[i] = entry;
+            return;
         }
     }
-    *env = realloc(*env, sizeof(char *) * (size_t)(*count + 2));
-    if (!*env) {
-        fputs("sudo: out of memory\n", stderr);
-        exit(1);
-    }
-    (*env)[(*count)++] = NULL;
-set:;
-    int index = 0;
-    for (; index < *count; index++)
-        if (!(*env)[index] ||
-            (strncmp((*env)[index], name, name_length) == 0 && (*env)[index][name_length] == '='))
-            break;
-    char *entry = malloc(name_length + strlen(value) + 2);
-    if (!entry) {
-        fputs("sudo: out of memory\n", stderr);
-        exit(1);
-    }
-    sprintf(entry, "%s=%s", name, value);
-    (*env)[index] = entry;
+    *env = sudoers_xrealloc(*env, sizeof(char *) * (size_t)(*count + 2));
+    (*env)[(*count)++] = entry;
     (*env)[*count] = NULL;
 }
 
@@ -350,25 +347,21 @@ static char **build_environment(const struct sudoers_settings *settings, bool pr
 {
     char **env = NULL;
     int count = 0;
-    env = malloc(sizeof(char *));
-    if (!env)
-        exit(1);
-    env[0] = NULL;
+    env = sudoers_xalloc(sizeof(char *));
     for (char **e = environ; e && *e; e++) {
         char *equals = strchr(*e, '=');
         if (!equals)
             continue;
-        char name[256];
         size_t length = (size_t)(equals - *e);
-        if (length == 0 || length >= sizeof(name))
+        if (length == 0)
             continue;
+        char *name = sudoers_xalloc(length + 1);
         memcpy(name, *e, length);
-        name[length] = 0;
-        if (pattern_in(always_delete, name))
-            continue;
-        if (settings->env_reset && !preserve && !keep_by_settings(settings, name))
-            continue;
-        env_put(&env, &count, name, equals + 1);
+        bool skip = pattern_in(always_delete, name) ||
+                    (settings->env_reset && !preserve && !keep_by_settings(settings, name));
+        if (!skip)
+            env_put(&env, &count, name, equals + 1);
+        free(name);
     }
     char number[32];
     env_put(&env, &count, "HOME", target->pw_dir ? target->pw_dir : "/");
@@ -394,62 +387,81 @@ static bool executable_file(const char *path)
     return stat(path, &info) == 0 && S_ISREG(info.st_mode) && (info.st_mode & 0111);
 }
 
-static bool resolve_command(const char *name, const char *search, char *out, size_t capacity)
+static bool resolve_command(const char *name, const char *search, char **out)
 {
     if (strchr(name, '/')) {
         char *real = realpath(name, NULL);
         if (real && executable_file(real)) {
-            snprintf(out, capacity, "%s", real);
-            free(real);
+            *out = real;
             return true;
         }
         free(real);
-        snprintf(out, capacity, "%s", name);
+        *out = sudoers_xdup(name);
         return false;
     }
-    char path[1024];
-    snprintf(path, sizeof(path), "%s", search && *search ? search : DEFAULT_PATH);
+    char *path = sudoers_xdup(search && *search ? search : DEFAULT_PATH);
     char *cursor = path;
     while (cursor) {
         char *end = strchr(cursor, ':');
         if (end)
             *end = 0;
         if (*cursor == '/') {
-            char candidate[1100];
-            snprintf(candidate, sizeof(candidate), "%s/%s", cursor, name);
+            char *candidate = sudoers_format("%s/%s", cursor, name);
             if (executable_file(candidate)) {
-                snprintf(out, capacity, "%s", candidate);
+                *out = candidate;
+                free(path);
                 return true;
             }
+            free(candidate);
         }
         cursor = end ? end + 1 : NULL;
     }
-    snprintf(out, capacity, "%s", name);
+    free(path);
+    *out = sudoers_xdup(name);
     return false;
 }
 
-static void join_arguments(char **argv, int count, char *out, size_t capacity)
+static char *join_arguments(char **argv, int count)
 {
-    out[0] = 0;
+    size_t total = 1;
+    for (int i = 0; i < count; i++)
+        total += strlen(argv[i]) + 1;
+    char *out = sudoers_xalloc(total);
     size_t used = 0;
     for (int i = 0; i < count; i++) {
-        int n = snprintf(out + used, capacity - used, "%s%s", i ? " " : "", argv[i]);
-        if (n < 0 || (size_t)n >= capacity - used)
-            break;
-        used += (size_t)n;
+        size_t length = strlen(argv[i]);
+        if (i)
+            out[used++] = ' ';
+        memcpy(out + used, argv[i], length);
+        used += length;
+    }
+    out[used] = 0;
+    return out;
+}
+
+static char *current_directory(void)
+{
+    size_t capacity = 128;
+    for (;;) {
+        char *buffer = sudoers_xalloc(capacity);
+        if (getcwd(buffer, capacity))
+            return buffer;
+        free(buffer);
+        if (errno != ERANGE)
+            return sudoers_xdup("?");
+        capacity *= 2;
     }
 }
 
 static void log_event(const char *invoker, const char *message, const char *runas,
                       const char *command)
 {
-    char cwd[256];
-    if (!getcwd(cwd, sizeof(cwd)))
-        snprintf(cwd, sizeof(cwd), "?");
-    char tty[96];
-    terminal_id(tty, sizeof(tty));
+    char *cwd = current_directory();
+    char *tty = terminal_id();
     syslog(LOG_NOTICE, "%s : %sTTY=%s ; PWD=%s ; USER=%s ; COMMAND=%s", invoker, message, tty,
            cwd, runas, command);
+    free(cwd);
+    free(tty);
 }
 
 static void print_defaults(const struct sudoers_settings *s)

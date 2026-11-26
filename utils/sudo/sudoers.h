@@ -2,10 +2,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <sys/types.h>
 
 #define SUDOERS_PATH "/etc/sudoers"
-#define SUDOERS_MAX_FILES 256
 
 struct sudoers_list {
     char **item;
@@ -67,12 +67,12 @@ struct sudoers {
     int defaults_count;
     struct sudoers_rule *rule;
     int rule_count;
-    char *files[SUDOERS_MAX_FILES];
+    char **files;
     int file_count;
-    char error[512];
-    char warning[8][256];
+    char *error;
+    char **warning;
     int warning_count;
-    char hostname[256];
+    char *hostname;
     bool check_permissions;
     bool strict;
 };
@@ -112,3 +112,8 @@ bool sudoers_user_has_nopasswd(const struct sudoers *db,
 void sudoers_list_rules(const struct sudoers *db,
                         const struct sudoers_subject *who, FILE *out);
 bool sudoers_name_in_list(const struct sudoers_list *list, const char *name);
+void *sudoers_xalloc(size_t size);
+void *sudoers_xrealloc(void *pointer, size_t size);
+char *sudoers_xdup(const char *text);
+char *sudoers_vformat(const char *format, va_list args);
+char *sudoers_format(const char *format, ...);

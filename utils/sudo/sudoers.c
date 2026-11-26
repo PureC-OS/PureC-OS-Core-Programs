@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <fnmatch.h>
 #include <grp.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -44,31 +45,75 @@ static const char *const ignored_defaults[] = {
     "mail_all_cmnds", "preserve_groups", "admin_flag", "secure_path_unused",
     NULL};
 
-static void *xalloc(size_t size)
+static void out_of_memory(void)
+{
+    fputs("sudo: out of memory\n", stderr);
+    exit(1);
+}
+
+void *sudoers_xalloc(size_t size)
 {
     void *pointer = calloc(1, size ? size : 1);
-    if (!pointer) {
-        fputs("sudo: out of memory\n", stderr);
-        exit(1);
-    }
+    if (!pointer)
+        out_of_memory();
     return pointer;
 }
 
-static char *xdup(const char *text)
+void *sudoers_xrealloc(void *pointer, size_t size)
+{
+    void *grown = realloc(pointer, size ? size : 1);
+    if (!grown)
+        out_of_memory();
+    return grown;
+}
+
+char *sudoers_xdup(const char *text)
 {
     size_t length = strlen(text);
-    char *copy = xalloc(length + 1);
+    char *copy = sudoers_xalloc(length + 1);
     memcpy(copy, text, length + 1);
     return copy;
 }
 
+char *sudoers_vformat(const char *format, va_list args)
+{
+    va_list again;
+    va_copy(again, args);
+    int length = vsnprintf(NULL, 0, format, args);
+    if (length < 0)
+        out_of_memory();
+    char *text = sudoers_xalloc((size_t)length + 1);
+    vsnprintf(text, (size_t)length + 1, format, again);
+    va_end(again);
+    return text;
+}
+
+char *sudoers_format(const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    char *text = sudoers_vformat(format, args);
+    va_end(args);
+    return text;
+}
+
+#define xalloc sudoers_xalloc
+#define xdup sudoers_xdup
+
+static void set_error(struct sudoers *db, const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    char *text = sudoers_vformat(format, args);
+    va_end(args);
+    free(db->error);
+    db->error = text;
+}
+
 static void list_add(struct sudoers_list *list, const char *text)
 {
-    char **grown = xalloc(sizeof(char *) * (size_t)(list->count + 1));
-    for (int i = 0; i < list->count; i++)
-        grown[i] = list->item[i];
-    grown[list->count++] = xdup(text);
-    list->item = grown;
+    list->item = sudoers_xrealloc(list->item, sizeof(char *) * (size_t)(list->count + 1));
+    list->item[list->count++] = xdup(text);
 }
 
 static void list_remove(struct sudoers_list *list, const char *text)
@@ -154,17 +199,15 @@ static void split_into(char *text, char separator, struct sudoers_list *out)
 
 static int fail(struct sudoers *db, const char *file, int line, const char *message)
 {
-    snprintf(db->error, sizeof(db->error), "%s:%d: %s", file, line, message);
+    set_error(db, "%s:%d: %s", file, line, message);
     return -1;
 }
 
 static void warn(struct sudoers *db, const char *file, int line, const char *message,
                  const char *detail)
 {
-    if (db->warning_count >= 8)
-        return;
-    snprintf(db->warning[db->warning_count++], sizeof(db->warning[0]),
-             "%s:%d: %s \"%s\"", file, line, message, detail);
+    db->warning = sudoers_xrealloc(db->warning, sizeof(char *) * (size_t)(db->warning_count + 1));
+    db->warning[db->warning_count++] = sudoers_format("%s:%d: %s \"%s\"", file, line, message, detail);
 }
 
 void sudoers_init(struct sudoers *db, bool check_permissions, bool strict)
@@ -172,9 +215,21 @@ void sudoers_init(struct sudoers *db, bool check_permissions, bool strict)
     memset(db, 0, sizeof(*db));
     db->check_permissions = check_permissions;
     db->strict = strict;
-    if (gethostname(db->hostname, sizeof(db->hostname)) != 0)
-        db->hostname[0] = 0;
-    db->hostname[sizeof(db->hostname) - 1] = 0;
+    size_t capacity = 64;
+    for (;;) {
+        char *name = sudoers_xalloc(capacity);
+        if (gethostname(name, capacity) != 0) {
+            free(name);
+            db->hostname = xdup("");
+            return;
+        }
+        if (strlen(name) + 1 < capacity) {
+            db->hostname = name;
+            return;
+        }
+        free(name);
+        capacity *= 2;
+    }
 }
 
 static const struct sudoers_alias *find_alias(const struct sudoers *db,
@@ -203,10 +258,18 @@ static int match_list(const struct sudoers *db, const struct sudoers_list *list,
                       enum match_kind kind, const struct match_context *context,
                       int depth);
 
+static int match_command_text(char *text, const struct sudoers_request *request);
+
 static int match_command(const char *item, const struct sudoers_request *request)
 {
-    char text[1024];
-    snprintf(text, sizeof(text), "%s", item);
+    char *text = xdup(item);
+    int result = match_command_text(text, request);
+    free(text);
+    return result;
+}
+
+static int match_command_text(char *text, const struct sudoers_request *request)
+{
     size_t length = strlen(text);
     if (length > 1 && text[length - 1] == '/') {
         text[length - 1] = 0;
@@ -287,7 +350,7 @@ static int match_item(const struct sudoers *db, const char *item, enum match_kin
         return strcmp(item, context->request->runas_group) == 0 ? MATCH_YES : MATCH_NONE;
     }
     case KIND_HOST:
-        if (!db->hostname[0])
+        if (!db->hostname || !db->hostname[0])
             return MATCH_NONE;
         return fnmatch(item, db->hostname, 0) == 0 ? MATCH_YES : MATCH_NONE;
     case KIND_CMND:
@@ -624,19 +687,11 @@ static int parse_defaults(struct sudoers *db, char *text, const char *file, int 
             }
             continue;
         }
-        struct sudoers_setting *grown =
-            xalloc(sizeof(*grown) * (size_t)(entry.count + 1));
-        for (int i = 0; i < entry.count; i++)
-            grown[i] = entry.setting[i];
-        grown[entry.count++] = setting;
-        entry.setting = grown;
+        entry.setting = sudoers_xrealloc(entry.setting, sizeof(*entry.setting) * (size_t)(entry.count + 1));
+        entry.setting[entry.count++] = setting;
     }
-    struct sudoers_defaults *grown =
-        xalloc(sizeof(*grown) * (size_t)(db->defaults_count + 1));
-    for (int i = 0; i < db->defaults_count; i++)
-        grown[i] = db->defaults[i];
-    grown[db->defaults_count++] = entry;
-    db->defaults = grown;
+    db->defaults = sudoers_xrealloc(db->defaults, sizeof(*db->defaults) * (size_t)(db->defaults_count + 1));
+    db->defaults[db->defaults_count++] = entry;
     return 0;
 }
 
@@ -667,11 +722,8 @@ static int parse_alias(struct sudoers *db, char *text, enum sudoers_alias_kind k
         split_into(equals + 1, ',', &alias.members);
         if (!alias.members.count)
             return fail(db, file, line, "syntax error");
-        struct sudoers_alias *grown = xalloc(sizeof(*grown) * (size_t)(db->alias_count + 1));
-        for (int i = 0; i < db->alias_count; i++)
-            grown[i] = db->alias[i];
-        grown[db->alias_count++] = alias;
-        db->alias = grown;
+        db->alias = sudoers_xrealloc(db->alias, sizeof(*db->alias) * (size_t)(db->alias_count + 1));
+        db->alias[db->alias_count++] = alias;
     }
     return 0;
 }
@@ -684,11 +736,8 @@ static bool tag_word(const char *text, const char *word)
 
 static int add_rule(struct sudoers *db, const struct sudoers_rule *rule)
 {
-    struct sudoers_rule *grown = xalloc(sizeof(*grown) * (size_t)(db->rule_count + 1));
-    for (int i = 0; i < db->rule_count; i++)
-        grown[i] = db->rule[i];
-    grown[db->rule_count++] = *rule;
-    db->rule = grown;
+    db->rule = sudoers_xrealloc(db->rule, sizeof(*db->rule) * (size_t)(db->rule_count + 1));
+    db->rule[db->rule_count++] = *rule;
     return 0;
 }
 
@@ -824,18 +873,14 @@ static int compare_names(const void *left, const void *right)
     return strcmp(*(char *const *)left, *(char *const *)right);
 }
 
-static void join_path(char *out, size_t capacity, const char *base_file, const char *name)
+static char *join_path(const char *base_file, const char *name)
 {
-    if (name[0] == '/') {
-        snprintf(out, capacity, "%s", name);
-        return;
-    }
+    if (name[0] == '/')
+        return xdup(name);
     const char *slash = strrchr(base_file, '/');
-    if (!slash) {
-        snprintf(out, capacity, "%s", name);
-        return;
-    }
-    snprintf(out, capacity, "%.*s/%s", (int)(slash - base_file), base_file, name);
+    if (!slash)
+        return xdup(name);
+    return sudoers_format("%.*s/%s", (int)(slash - base_file), base_file, name);
 }
 
 static char *include_argument(char *text)
@@ -858,12 +903,11 @@ static int load_directory(struct sudoers *db, const char *directory, int depth,
         return 0;
     if (db->check_permissions) {
         if (info.st_uid != 0) {
-            snprintf(db->error, sizeof(db->error), "%s is owned by uid %u, should be 0",
-                     directory, (unsigned)info.st_uid);
+            set_error(db, "%s is owned by uid %u, should be 0", directory, (unsigned)info.st_uid);
             return -1;
         }
         if (info.st_mode & 002) {
-            snprintf(db->error, sizeof(db->error), "%s is world writable", directory);
+            set_error(db, "%s is world writable", directory);
             return -1;
         }
     }
@@ -878,22 +922,22 @@ static int load_directory(struct sudoers *db, const char *directory, int depth,
         size_t length = strlen(name);
         if (strchr(name, '.') || (length && name[length - 1] == '~'))
             continue;
-        char **grown = xalloc(sizeof(char *) * (size_t)(count + 1));
-        for (int i = 0; i < count; i++)
-            grown[i] = names[i];
-        grown[count++] = xdup(name);
-        names = grown;
+        names = sudoers_xrealloc(names, sizeof(char *) * (size_t)(count + 1));
+        names[count++] = xdup(name);
     }
     closedir(dir);
     if (count > 1)
         qsort(names, (size_t)count, sizeof(char *), compare_names);
+    int result = 0;
     for (int i = 0; i < count; i++) {
-        char full[1024];
-        snprintf(full, sizeof(full), "%s/%s", directory, names[i]);
-        if (load_file(db, full, depth + 1) != 0)
-            return -1;
+        char *full = sudoers_format("%s/%s", directory, names[i]);
+        if (result == 0 && load_file(db, full, depth + 1) != 0)
+            result = -1;
+        free(full);
+        free(names[i]);
     }
-    return 0;
+    free(names);
+    return result;
 }
 
 static int process_line(struct sudoers *db, char *text, const char *file, int line, int depth)
@@ -902,16 +946,16 @@ static int process_line(struct sudoers *db, char *text, const char *file, int li
     if (!*body)
         return 0;
     if (strncmp(body, "#includedir", 11) == 0 || strncmp(body, "@includedir", 11) == 0) {
-        char full[1024];
-        join_path(full, sizeof(full), file, include_argument(body + 11));
-        return load_directory(db, full, depth, file, line);
+        char *full = join_path(file, include_argument(body + 11));
+        int result = load_directory(db, full, depth, file, line);
+        free(full);
+        return result;
     }
     if (strncmp(body, "#include", 8) == 0 || strncmp(body, "@include", 8) == 0) {
-        char full[1024];
-        join_path(full, sizeof(full), file, include_argument(body + 8));
-        if (load_file(db, full, depth + 1) != 0)
-            return -1;
-        return 0;
+        char *full = join_path(file, include_argument(body + 8));
+        int result = load_file(db, full, depth + 1) != 0 ? -1 : 0;
+        free(full);
+        return result;
     }
     char *comment = NULL;
     bool quoted = false;
@@ -951,35 +995,35 @@ static int process_line(struct sudoers *db, char *text, const char *file, int li
 static int load_file(struct sudoers *db, const char *path, int depth)
 {
     if (depth > INCLUDE_DEPTH) {
-        snprintf(db->error, sizeof(db->error), "%s: too many levels of includes", path);
+        set_error(db, "%s: too many levels of includes", path);
         return -1;
     }
     int fd = open(path, O_RDONLY);
     if (fd < 0) {
-        snprintf(db->error, sizeof(db->error), "unable to open %s: %s", path, strerror(errno));
+        set_error(db, "unable to open %s: %s", path, strerror(errno));
         return -1;
     }
     struct stat info;
     if (fstat(fd, &info) != 0) {
         close(fd);
-        snprintf(db->error, sizeof(db->error), "unable to stat %s: %s", path, strerror(errno));
+        set_error(db, "unable to stat %s: %s", path, strerror(errno));
         return -1;
     }
     if (db->check_permissions) {
         if (info.st_uid != 0) {
             close(fd);
-            snprintf(db->error, sizeof(db->error), "%s is owned by uid %u, should be 0", path,
+            set_error(db, "%s is owned by uid %u, should be 0", path,
                      (unsigned)info.st_uid);
             return -1;
         }
         if (info.st_mode & 002) {
             close(fd);
-            snprintf(db->error, sizeof(db->error), "%s is world writable", path);
+            set_error(db, "%s is world writable", path);
             return -1;
         }
         if (info.st_mode & 020) {
             close(fd);
-            snprintf(db->error, sizeof(db->error), "%s is writable by group", path);
+            set_error(db, "%s is writable by group", path);
             return -1;
         }
     }
@@ -997,7 +1041,7 @@ static int load_file(struct sudoers *db, const char *path, int depth)
         ssize_t got = read(fd, buffer + length, capacity - length - 1);
         if (got < 0) {
             close(fd);
-            snprintf(db->error, sizeof(db->error), "unable to read %s: %s", path, strerror(errno));
+            set_error(db, "unable to read %s: %s", path, strerror(errno));
             return -1;
         }
         if (got == 0)
@@ -1006,8 +1050,8 @@ static int load_file(struct sudoers *db, const char *path, int depth)
     }
     close(fd);
     buffer[length] = 0;
-    if (db->file_count < SUDOERS_MAX_FILES)
-        db->files[db->file_count++] = xdup(path);
+    db->files = sudoers_xrealloc(db->files, sizeof(char *) * (size_t)(db->file_count + 1));
+    db->files[db->file_count++] = xdup(path);
     char *joined = xalloc(length + 2);
     int line = 1;
     int status = 0;
