@@ -1,4 +1,5 @@
 #include "../include/purec/sysasm.h"
+#include "../include/purec/abi/syscall_nr.h"
 #include <stddef.h>
 #include <stdint.h>
 #include "ld_tls.h"
@@ -6,9 +7,6 @@
 
 #define EXPORT __attribute__((visibility("default")))
 #define TLS_PAGE 4096ULL
-#define TLS_SYS_MMAP 357
-#define TLS_SYS_MUNMAP 358
-#define TLS_SYS_SET_FS_BASE 378
 #define TLS_R_DTPMOD64 16
 #define TLS_R_DTPOFF64 17
 #define TLS_R_TPOFF64 18
@@ -66,13 +64,13 @@ static void tls_copy(void *dst, const void *src, size_t n)
 static void *map_pages(size_t size)
 {
   uint64_t req[4] = {0, round_up(size, TLS_PAGE), 3, 0};
-  int64_t base = tls_sys3(TLS_SYS_MMAP, (uint64_t)req, 0, 0);
+  int64_t base = tls_sys3(SYS_MMAP, (uint64_t)req, 0, 0);
   return base < 0 ? 0 : (void *)base;
 }
 
 static void unmap_pages(void *base, size_t size)
 {
-  tls_sys3(TLS_SYS_MUNMAP, (uint64_t)base, round_up(size, TLS_PAGE), 0);
+  tls_sys3(SYS_MUNMAP, (uint64_t)base, round_up(size, TLS_PAGE), 0);
 }
 
 static uint8_t *current_tp(void)
@@ -183,7 +181,7 @@ int ld_tls_finalize(const char **err)
     return -1;
   }
   uint8_t *tp = setup_block(base, 0);
-  if (tls_sys3(TLS_SYS_SET_FS_BASE, (uint64_t)tp, 0, 0) < 0)
+  if (tls_sys3(SYS_SET_FS_BASE, (uint64_t)tp, 0, 0) < 0)
   {
     *err = "cannot set thread pointer";
     return -1;

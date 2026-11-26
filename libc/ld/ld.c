@@ -1,18 +1,10 @@
 #include "../include/purec/sysasm.h"
+#include "../include/purec/abi/syscall_nr.h"
 #include <stddef.h>
 #include <stdint.h>
 #include "ld_tls.h"
 
 #define PAGE 4096ULL
-#define SYS_WRITE_N 1
-#define SYS_EXIT_N 60
-#define SYS_FILE_OPEN_N 200
-#define SYS_FILE_READ_N 201
-#define SYS_FILE_CLOSE_N 222
-#define SYS_FILE_SEEK_N 275
-#define SYS_MMAP_N 357
-#define SYS_MUNMAP_N 358
-#define SYS_MPROTECT_N 359
 
 #define KPROT_READ 1
 #define KPROT_WRITE 2
@@ -196,7 +188,7 @@ struct mmap_req { uint64_t address, length, prot, flags; };
 static int64_t sys_mmap(uint64_t address, uint64_t length, uint64_t prot, uint64_t flags)
 {
   struct mmap_req req = {address, length, prot, flags};
-  return sys3(SYS_MMAP_N, (uint64_t)&req, 0, 0);
+  return sys3(SYS_MMAP, (uint64_t)&req, 0, 0);
 }
 
 HIDDEN void *memcpy(void *dst, const void *src, size_t n)
@@ -255,7 +247,7 @@ static int scmp(const char *a, const char *b)
 
 static void write_err(const char *s)
 {
-  sys3(SYS_WRITE_N, (uint64_t)s, slen(s), 2);
+  sys3(SYS_WRITE, (uint64_t)s, slen(s), 2);
 }
 
 static void fatal(const char *a, const char *b)
@@ -268,7 +260,7 @@ static void fatal(const char *a, const char *b)
     write_err(b);
   }
   write_err("\n");
-  sys3(SYS_EXIT_N, 127, 0, 0);
+  sys3(SYS_EXIT, 127, 0, 0);
   for (;;)
     __asm__ volatile("hlt");
 }
@@ -477,23 +469,23 @@ static uint64_t sym_address(const struct found *f)
 
 static int ld_open(const char *path)
 {
-  return (int)sys3(SYS_FILE_OPEN_N, (uint64_t)path, 0, 0);
+  return (int)sys3(SYS_FILE_OPEN, (uint64_t)path, 0, 0);
 }
 
 static void ld_close(int fd)
 {
-  sys3(SYS_FILE_CLOSE_N, (uint64_t)fd, 0, 0);
+  sys3(SYS_FILE_CLOSE, (uint64_t)fd, 0, 0);
 }
 
 static int read_at(int fd, uint64_t offset, void *buffer, uint64_t length)
 {
-  if (sys3(SYS_FILE_SEEK_N, (uint64_t)fd, offset, 0) < 0)
+  if (sys3(SYS_FILE_SEEK, (uint64_t)fd, offset, 0) < 0)
     return -1;
   uint8_t *out = buffer;
   while (length)
   {
     uint64_t chunk = length > 0x40000ULL ? 0x40000ULL : length;
-    int64_t got = sys3(SYS_FILE_READ_N, (uint64_t)fd, (uint64_t)out, chunk);
+    int64_t got = sys3(SYS_FILE_READ, (uint64_t)fd, (uint64_t)out, chunk);
     if (got <= 0)
       return -1;
     out += got;
@@ -741,11 +733,11 @@ static void protect_object(struct obj *o)
     uint32_t prot = seg_prot(p->flags);
     if (s < prev_hi)
     {
-      sys3(SYS_MPROTECT_N, s, PAGE, prot | prev_prot);
+      sys3(SYS_MPROTECT, s, PAGE, prot | prev_prot);
       s += PAGE;
     }
     if (e > s)
-      sys3(SYS_MPROTECT_N, s, e - s, prot);
+      sys3(SYS_MPROTECT, s, e - s, prot);
     prev_hi = e;
     prev_prot = prot;
   }
@@ -757,7 +749,7 @@ static void protect_object(struct obj *o)
     uint64_t s = (o->base + p->vaddr) & ~(PAGE - 1);
     uint64_t e = (o->base + p->vaddr + p->memsz) & ~(PAGE - 1);
     if (e > s)
-      sys3(SYS_MPROTECT_N, s, e - s, KPROT_READ);
+      sys3(SYS_MPROTECT, s, e - s, KPROT_READ);
   }
 }
 
@@ -803,7 +795,7 @@ static int try_open_in(const char *dir, uint64_t dlen, const char *name, char *o
 
 static void write_out(const char *s)
 {
-  sys3(SYS_WRITE_N, (uint64_t)s, slen(s), 1);
+  sys3(SYS_WRITE, (uint64_t)s, slen(s), 1);
 }
 
 static void write_hex(uint64_t v)
@@ -866,7 +858,7 @@ static int cache_lookup(const char *name, char *path, uint64_t cap)
   uint64_t nlen = slen(name);
   for (;;)
   {
-    int64_t got = sys3(SYS_FILE_READ_N, (uint64_t)fd, (uint64_t)chunk, sizeof(chunk));
+    int64_t got = sys3(SYS_FILE_READ, (uint64_t)fd, (uint64_t)chunk, sizeof(chunk));
     if (got <= 0)
       break;
     for (int64_t i = 0; i < got && result < 0; i++)
@@ -1007,7 +999,7 @@ static struct obj *load_file(int fd, const char *path)
   {
     ld_tls_release(o->tls_modid);
     if (o->lo)
-      sys3(SYS_MUNMAP_N, o->lo, o->hi - o->lo, 0);
+      sys3(SYS_MUNMAP, o->lo, o->hi - o->lo, 0);
     return 0;
   }
   parse_dynamic(o);
@@ -1015,7 +1007,7 @@ static struct obj *load_file(int fd, const char *path)
   {
     set_error(path, "missing symbol table");
     ld_tls_release(o->tls_modid);
-    sys3(SYS_MUNMAP_N, o->lo, o->hi - o->lo, 0);
+    sys3(SYS_MUNMAP, o->lo, o->hi - o->lo, 0);
     return 0;
   }
   o->refs = 0;
@@ -1354,7 +1346,7 @@ static void release_object(struct obj *o)
   o->ndeps = 0;
   subs_counter++;
   ld_tls_release(o->tls_modid);
-  sys3(SYS_MUNMAP_N, lo, size, 0);
+  sys3(SYS_MUNMAP, lo, size, 0);
   for (uint64_t i = 0; i < ndeps; i++)
     drop_ref(deps[i]);
 }
@@ -1367,7 +1359,7 @@ static void discard_created(struct obj *created)
     global_remove(o);
     unlink_obj(o);
     ld_tls_release(o->tls_modid);
-    sys3(SYS_MUNMAP_N, o->lo, o->hi - o->lo, 0);
+    sys3(SYS_MUNMAP, o->lo, o->hi - o->lo, 0);
     o = next;
   }
 }
@@ -1485,7 +1477,7 @@ static uint64_t dl_main(uint64_t *frame, const Phdr *ph, uint16_t phnum, uint64_
       write_hex(o->base);
       write_out(")\n");
     }
-    sys3(SYS_EXIT_N, trace_missing ? 1 : 0, 0, 0);
+    sys3(SYS_EXIT, trace_missing ? 1 : 0, 0, 0);
   }
   if (build_scope(exe) < 0)
     fatal("out of memory", 0);
