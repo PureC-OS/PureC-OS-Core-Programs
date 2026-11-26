@@ -44,8 +44,10 @@ def load(path):
             line = raw.strip()
             if not line or line.startswith("#"):
                 continue
-            name, dest, source, required = line.split()
-            packages.setdefault(name, []).append((dest.lstrip("/"), source, required == "1"))
+            fields = line.split()
+            name, dest, source, required = fields[:4]
+            mode = fields[4] if len(fields) > 4 else None
+            packages.setdefault(name, []).append((dest.lstrip("/"), source, required == "1", mode))
     return packages
 
 
@@ -73,7 +75,7 @@ def main():
         args.bin = os.path.dirname(os.path.normpath(args.programs))
     packages = load(args.conf)
     for name, entries in EXTRA.items():
-        packages[name] = [(d, s, False) for d, s in entries]
+        packages[name] = [(d, s, False, None) for d, s in entries]
     os.makedirs(args.out, exist_ok=True)
     for old in os.listdir(args.out):
         if old.endswith(".pkg.tar.gz") or old.endswith(".pkg.tar.gz.sig"):
@@ -102,7 +104,7 @@ def main():
                     else:
                         cmd += ["--file", "%s=%s" % (target, path)]
                     count += 1
-            for dest, source, required in packages.get(name, []):
+            for dest, source, required, mode in packages.get(name, []):
                 path = resolve(source, args.root, args.programs)
                 if not os.path.isfile(path):
                     if required:
@@ -112,6 +114,8 @@ def main():
                     print("mkpackages: skip missing %s" % path)
                     continue
                 cmd += ["--file", "%s=%s" % (dest, path)]
+                if mode:
+                    cmd += ["--mode", "%s=%s" % (dest, mode)]
                 count += 1
             if name in EXTRA and count == 0:
                 print("mkpackages: %s not built, skipped" % name)
