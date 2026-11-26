@@ -113,7 +113,7 @@ static const struct kind_table kinds[] = {
     {"env_set", "ss"},
     {"env_unset", "s"},
     {"sync", ""},
-    {"sudo", "spp"},
+    {"sudo_removed", ""},
 };
 
 static const struct sig_entry sigs[] = {
