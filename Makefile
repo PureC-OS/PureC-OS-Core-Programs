@@ -72,7 +72,7 @@ GENERAL_CPP_SOURCES :=
 UTILS := ls cat cp mv rm mkdir rmdir touch chmod stat find tree du df install realpath basename dirname \
 	grep head tail wc sort uniq cut tr tee cmp diff nl rev seq yes xargs xxd \
 	echo pwd env uname whoami id hostname date uptime sleep true false kill ps free which \
-	clear reboot ping man less help cd sudo ip host ss chvt tty fdisk iwxctl blkid mkinitcpio sync ldd ldconfig ln readlink
+	clear reboot ping man less help cd ip host ss chvt tty fdisk iwxctl blkid mkinitcpio sync ldd ldconfig ln readlink
 UTIL_LIB_OBJECTS := $(OBJ_DIR)/utils/lib/common.o $(OBJ_DIR)/utils/lib/pager.o $(OBJ_DIR)/utils/lib/fileops.o
 UTIL_OBJECTS := $(foreach u,$(UTILS),$(OBJ_DIR)/utils/$(u)/$(u).o) $(UTIL_LIB_OBJECTS) $(OBJ_DIR)/utils/trace/trace.o
 TRACELIB_OBJ := $(OBJ_DIR)/tracelib/sysnames.o
@@ -114,7 +114,9 @@ TARGETS := \
 	$(PROGRAM_DIR)/monitor \
 	$(PROGRAM_DIR)/strace \
 	$(PROGRAM_DIR)/trace \
-	$(UTIL_TARGETS)
+	$(UTIL_TARGETS) \
+	$(PROGRAM_DIR)/sudo \
+	$(PROGRAM_DIR)/visudo
 
 PORT_TARGETS := $(PROGRAM_DIR)/lua
 	
@@ -238,6 +240,21 @@ $(PROGRAM_DIR)/dltest-dyn: $(OBJ_DIR)/dltest/main-pic.o $(DYN_DEPS) $(PIE_INTERP
 $(UTIL_OBJECTS): $(OBJ_DIR)/utils/%.o: $(SRC_DIR)/utils/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -I$(LIBC_DIR)/include/hosted $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
+
+SUDO_OBJECTS := $(OBJ_DIR)/utils/sudo/sudo.o $(OBJ_DIR)/utils/sudo/sudoers.o
+VISUDO_OBJECTS := $(OBJ_DIR)/utils/visudo/visudo.o $(OBJ_DIR)/utils/sudo/sudoers.o
+
+$(SUDO_OBJECTS) $(VISUDO_OBJECTS): $(OBJ_DIR)/utils/%.o: $(SRC_DIR)/utils/%.c $(SRC_DIR)/utils/sudo/sudoers.h
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) -I$(LIBC_DIR)/include/hosted -I$(CRYPT_DIR)/include $(DEPFLAGS) $(USER_CFLAGS) -c $< -o $@
+
+$(PROGRAM_DIR)/sudo: $(SUDO_OBJECTS) $(LIB_DIR)/crt0.o $(LIBPURECRYPT) $(LIBPUREC) $(LINKER_SCRIPT)
+	@mkdir -p $(@D)
+	$(LD) -S -T $(LINKER_SCRIPT) -o $@ $(LIB_DIR)/crt0.o $(SUDO_OBJECTS) $(LIBPURECRYPT) $(LIBPUREC)
+
+$(PROGRAM_DIR)/visudo: $(VISUDO_OBJECTS) $(LIB_DIR)/crt0.o $(LIBPUREC) $(LINKER_SCRIPT)
+	@mkdir -p $(@D)
+	$(LD) -S -T $(LINKER_SCRIPT) -o $@ $(LIB_DIR)/crt0.o $(VISUDO_OBJECTS) $(LIBPUREC)
 
 define UTIL_RULE
 $(PROGRAM_DIR)/$(1): $(OBJ_DIR)/utils/$(1)/$(1).o $(UTIL_LIB_OBJECTS) $(LIB_DIR)/crt0.o $(LIBPUREFS) $(LIBPUREC) $(LINKER_SCRIPT)
