@@ -4,12 +4,18 @@
 #include <dirent.h>
 #include <pwd.h>
 #include <unistd.h>
+#include <time.h>
 #include "pg/pg.h"
 #include "model.h"
 #include "view.h"
+#include "menubar.h"
+#include "savedlg.h"
 
 static struct {
     struct pg_window *win;
+    struct pg_widget *body, *tabs, *stack, *chev;
+    bool details_open;
+    uint64_t msg_until;
     struct pg_widget *cmd, *start, *attach, *pause, *detach, *clear, *filter, *breaks, *cont, *step, *auto_cb, *status;
     bool paused;
     bool dirty;
@@ -40,6 +46,7 @@ static void set_message(const char *text, bool bad)
 {
     snprintf(app.message, sizeof(app.message), "%s", text);
     app.message_bad = bad;
+    app.msg_until = pg_time_ms() + 6000;
     pg_label_set_color(app.status, bad ? PG_COLOR_DANGER : PG_COLOR_TEXT2);
     pg_label_set_text(app.status, app.message);
 }
@@ -49,6 +56,14 @@ static void update_status(void)
     char text[200];
     if (app.message[0] && app.message_bad)
         return;
+    if (app.message[0]) {
+        if (pg_time_ms() < app.msg_until) {
+            pg_label_set_color(app.status, PG_COLOR_TEXT2);
+            pg_label_set_text(app.status, app.message);
+            return;
+        }
+        app.message[0] = 0;
+    }
     if (M.session >= 0) {
         struct trace_status st;
         if (pc_trace_control(M.session, TRACE_OP_STATUS, &st) >= 0)
@@ -508,11 +523,252 @@ static void on_breaks(struct pg_widget *w, void *data)
     pg_window_set_child(brk.win, root);
 }
 
+static char *clip;
+
+static void copy_text(char *text)
+{
+    if (!text) {
+        set_message("Nothing is selected", true);
+        return;
+    }
+    free(clip);
+    clip = text;
+    char msg[96];
+    snprintf(msg, sizeof(msg), "Copied %zu bytes to the application clipboard", strlen(clip));
+    set_message(msg, false);
+}
+
+static void set_details(bool show)
+{
+    app.details_open = show;
+    pg_widget_set_visible(app.stack, show);
+    pg_widget_queue_layout(app.body);
+    pg_widget_queue_draw(app.chev);
+    view_redraw();
+}
+
+static void chev_draw(struct pg_widget *w, struct pg_canvas *c, void *data)
+{
+    (void)data;
+    const struct pg_theme *t = pg_theme();
+    struct pg_rect r = w->rect;
+    if (w->hovered)
+        pgc_rrect(c, r.x + 2, r.y + 2, r.w - 4, r.h - 4, 5, t->surface3, 255);
+    float cx = (float)(r.x + r.w / 2), cy = (float)(r.y + r.h / 2);
+    float dy = app.details_open ? 2.5f : -2.5f;
+    pgc_line(c, cx - 5.0f, cy - dy, cx, cy + dy, 1.8f, t->text2);
+    pgc_line(c, cx, cy + dy, cx + 5.0f, cy - dy, 1.8f, t->text2);
+}
+
+static bool chev_input(struct pg_widget *w, const struct pg_event *e, void *data)
+{
+    (void)data;
+    switch (e->type) {
+    case PG_EVENT_ENTER:
+    case PG_EVENT_LEAVE:
+        pg_widget_queue_draw(w);
+        return false;
+    case PG_EVENT_POINTER_DOWN:
+        return e->button == PG_BUTTON_LEFT;
+    case PG_EVENT_POINTER_UP:
+        if (e->button == PG_BUTTON_LEFT)
+            set_details(!app.details_open);
+        return true;
+    default:
+        return false;
+    }
+}
+
+static void on_tab(struct pg_widget *w, void *data)
+{
+    (void)w;
+    (void)data;
+    if (!app.details_open)
+        set_details(true);
+}
+
+static char *default_export_path(void)
+{
+    const char *home = getenv("HOME");
+    struct passwd *pw = NULL;
+    if (!home || !*home) {
+        pw = getpwuid(getuid());
+        home = pw && pw->pw_dir && *pw->pw_dir ? pw->pw_dir : "/";
+    }
+    time_t now = time(NULL);
+    struct tm tmv;
+    localtime_r(&now, &tmv);
+    char name[64];
+    snprintf(name, sizeof(name), "strace-%u-%04d%02d%02d-%02d%02d%02d.json", M.root_pid, tmv.tm_year + 1900,
+             tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+    size_t hl = strlen(home);
+    char *p = malloc(hl + strlen(name) + 2);
+    if (!p)
+        return NULL;
+    memcpy(p, home, hl);
+    if (hl && home[hl - 1] != '/')
+        p[hl++] = '/';
+    strcpy(p + hl, name);
+    return p;
+}
+
+static const char *export_to(const char *path)
+{
+    static char msg[160];
+    const char *err = model_export_json(path);
+    if (err) {
+        set_message(err, true);
+        return err;
+    }
+    snprintf(msg, sizeof(msg), "Exported the trace to %s", path);
+    set_message(msg, false);
+    return NULL;
+}
+
+static void do_export(void)
+{
+    char *path = default_export_path();
+    if (!path) {
+        set_message("Out of memory", true);
+        return;
+    }
+    savedlg_open(path, export_to);
+    free(path);
+}
+
+static void show_text(const char *title, const char *text, int w, int h, int font)
+{
+    struct pg_window *win = pg_window_new(title, w, h, PG_WINDOW_RESIZABLE);
+    if (!win)
+        return;
+    pg_window_set_min_size(win, 320, 200);
+    struct pg_widget *root = pg_vbox(10);
+    pg_box_set_padding(root, 16, 14, 16, 14);
+    struct pg_widget *label = pg_label_new_font(text, font, PG_COLOR_TEXT);
+    pg_label_set_wrap(label, true);
+    struct pg_widget *scroll = pg_scroll_new();
+    pg_widget_set_expand(scroll, true, true);
+    pg_widget_add(scroll, label);
+    pg_widget_add(root, scroll);
+    pg_window_set_child(win, root);
+}
+
+static void show_man(void)
+{
+    FILE *f = fopen("/usr/share/man/strace.1", "r");
+    if (!f) {
+        set_message("The manual page /usr/share/man/strace.1 is not installed", true);
+        return;
+    }
+    size_t cap = 4096, n = 0;
+    char *buf = malloc(cap);
+    while (buf) {
+        size_t got = fread(buf + n, 1, cap - n - 1, f);
+        n += got;
+        if (n + 1 < cap)
+            break;
+        char *nb = realloc(buf, cap * 2);
+        if (!nb) {
+            free(buf);
+            buf = NULL;
+            break;
+        }
+        buf = nb;
+        cap *= 2;
+    }
+    fclose(f);
+    if (!buf) {
+        set_message("Out of memory", true);
+        return;
+    }
+    buf[n] = 0;
+    show_text("man strace", buf, 720, 620, PGF_MONO_S);
+    free(buf);
+}
+
+static bool menu_enabled(int act)
+{
+    bool active = M.session >= 0;
+    switch (act) {
+    case A_EXPORT:
+        return M.nprocs > 0;
+    case A_COPY_ROW:
+    case A_COPY_DETAILS:
+        return view_has_selection();
+    case A_DETACH:
+        return active;
+    case A_CONTINUE:
+    case A_STEP:
+        return active && model_any_stopped();
+    default:
+        return true;
+    }
+}
+
+static bool menu_checked(int act)
+{
+    if (act == A_TOGGLE_DETAILS)
+        return app.details_open;
+    if (act == A_AUTOSCROLL)
+        return pg_checkbox_active(app.auto_cb);
+    if (act == A_PAUSE)
+        return app.paused;
+    return false;
+}
+
+static void run_action(int act)
+{
+    switch (act) {
+    case A_RUN:
+        pg_widget_grab_focus(app.cmd);
+        pg_entry_select_all(app.cmd);
+        break;
+    case A_ATTACH: on_attach(NULL, NULL); break;
+    case A_EXPORT: do_export(); break;
+    case A_CLEAR: on_clear(NULL, NULL); break;
+    case A_QUIT: pg_window_close(app.win); break;
+    case A_COPY_ROW: copy_text(view_selected_row_text()); break;
+    case A_COPY_DETAILS: copy_text(view_selected_details_text()); break;
+    case A_FOCUS_FILTER:
+        pg_widget_grab_focus(app.filter);
+        pg_entry_select_all(app.filter);
+        break;
+    case A_TOGGLE_DETAILS: set_details(!app.details_open); break;
+    case A_AUTOSCROLL: {
+        bool on = !pg_checkbox_active(app.auto_cb);
+        pg_checkbox_set_active(app.auto_cb, on);
+        view_set_autoscroll(on);
+        break;
+    }
+    case A_EXPAND_ALL: view_expand_all(true); break;
+    case A_COLLAPSE_ALL: view_expand_all(false); break;
+    case A_STATS:
+        pg_tabs_set_selected(app.tabs, 1);
+        set_details(true);
+        break;
+    case A_START: on_start(NULL, NULL); break;
+    case A_PAUSE: on_pause(NULL, NULL); break;
+    case A_CONTINUE: on_continue(NULL, NULL); break;
+    case A_STEP: on_step(NULL, NULL); break;
+    case A_DETACH: on_detach(NULL, NULL); break;
+    case A_BREAKS: on_breaks(NULL, NULL); break;
+    case A_ABOUT:
+        show_text("About Syscall Tracer", "Syscall Tracer\n\nA graphical system call tracer built on the kernel tracing facility.\nFollows forked children, decodes arguments, supports breakpoints and\nstepping, and exports the whole session to JSON.", 480, 240, PGF_BODY);
+        break;
+    case A_MAN: show_man(); break;
+    default: break;
+    }
+}
+
+static const struct menubar_hooks hooks = {menu_enabled, menu_checked, run_action};
+
 static bool on_close(struct pg_window *win, void *data)
 {
     (void)win;
     (void)data;
     model_detach();
+    menubar_close();
+    savedlg_close();
     if (att.win)
         pg_window_close(att.win);
     if (brk.win)
@@ -525,9 +781,18 @@ static bool on_key(struct pg_window *win, const struct pg_event *e, void *data)
     (void)data;
     if (e->type != PG_EVENT_KEY_DOWN)
         return false;
+    if (menubar_key(e))
+        return true;
     if ((e->mods & PG_MOD_CTRL) && (e->key == PG_KEY_Q || e->key == PG_KEY_W)) {
         pg_window_close(win);
         return true;
+    }
+    if (e->mods & PG_MOD_CTRL) {
+        int act = e->key == PG_KEY_A + 18 ? A_EXPORT : e->key == PG_KEY_A + 9 ? A_TOGGLE_DETAILS : e->key == PG_KEY_A + 5 ? A_FOCUS_FILTER : 0;
+        if (act && menu_enabled(act)) {
+            run_action(act);
+            return true;
+        }
     }
     if (e->key == PG_KEY_F1 + 4 && pg_widget_is_enabled(app.cont)) {
         on_continue(NULL, NULL);
@@ -565,7 +830,9 @@ int main(int argc, char **argv)
     pg_window_on_close(app.win, on_close, NULL);
 
     struct pg_widget *body = pg_vbox(0);
+    app.body = body;
     pg_box_set_background(body, PG_COLOR_BG, 0);
+    pg_widget_add(body, menubar_new(app.win, &hooks));
 
     struct pg_widget *bar1 = pg_hbox(8);
     pg_box_set_padding(bar1, 14, 12, 14, 4);
@@ -602,10 +869,20 @@ int main(int argc, char **argv)
 
     static const char *const tab_labels[2] = {"Details", "Statistics"};
     struct pg_widget *tabs = pg_tabs_new(tab_labels, 2);
-    pg_widget_add(body, tabs);
+    app.tabs = tabs;
+    pg_widget_set_expand(tabs, true, false);
+    pg_widget_on(tabs, PG_SIGNAL_CHANGED, on_tab, NULL);
+    struct pg_widget *head = pg_hbox(0);
+    app.chev = pg_drawing_new(32, 30, chev_draw, chev_input, NULL);
+    pg_widget_set_expand(app.chev, false, false);
+    pg_widget_add(head, app.chev);
+    pg_widget_add(head, tabs);
+    pg_widget_add(body, head);
     struct pg_widget *stack = pg_stack_new();
     pg_widget_set_size(stack, -1, 190);
     pg_widget_set_expand(stack, true, false);
+    app.stack = stack;
+    app.details_open = true;
     pg_widget_add(stack, view_detail_new());
     pg_widget_add(stack, view_stats_new());
     pg_tabs_bind_stack(tabs, stack);

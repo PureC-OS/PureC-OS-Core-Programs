@@ -17,7 +17,7 @@ TRACELIB_PIC := $(OBJ)/sysnames-pic.o
 TRACELIB_SRC := $(abspath ..)/tracelib
 
 CFLAGS := $(CPPFLAGS) -I$(LIBC_DIR)/include/hosted -I$(LIBGUI_DIR)/include -I$(VB_DIR)/include \
-	$(DYN_CFLAGS) -O2 -Wall -Wextra $(DEPFLAGS)
+	$(DYN_CFLAGS) -O2 -Wall -Wextra $(DEPFLAGS) -DSTRACE_VERSION='"$(shell cat VERSION)"'
 
 OBJECTS := $(patsubst src/%.c,$(OBJ)/%.o,$(wildcard src/*.c))
 TARGET := $(OUT)/$(NAME)

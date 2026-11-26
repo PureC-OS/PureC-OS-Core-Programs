@@ -52,6 +52,8 @@ struct item *item_at(uint32_t seq)
 
 void model_clear(void)
 {
+    free(M.command);
+    M.command = NULL;
     for (int i = 0; i < MAX_PROCS; i++)
         free(P[i].st);
     memset(P, 0, sizeof(P));
@@ -246,6 +248,9 @@ static void handle(const struct trace_record *r)
             p->stopped = false;
             M.stop_changed = true;
         }
+        p->exited = true;
+        p->exit_signal = (int)r->args[0];
+        p->exit_code = (int)r->ret;
         tl_format_exit(r, p->exit_text, sizeof(p->exit_text));
         for (int i = 0; i < MAX_PENDING; i++)
             if (pend[i].used && item_valid(pend[i].seq)) {
@@ -385,7 +390,12 @@ const char *model_attach(uint32_t pid)
 {
     if (pid <= 1 || pid == (uint32_t)getpid())
         return "this process cannot be traced";
-    return begin_session(pid);
+    const char *err = begin_session(pid);
+    if (!err) {
+        free(M.command);
+        M.command = NULL;
+    }
+    return err;
 }
 
 static int split(char *line, char **argv, int max)
@@ -452,6 +462,8 @@ const char *model_start_command(const char *line)
         return err;
     }
     M.child_pid = child;
+    free(M.command);
+    M.command = strdup(line);
     char go = 'g';
     write(fds[1], &go, 1);
     close(fds[1]);

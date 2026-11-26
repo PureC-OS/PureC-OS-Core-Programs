@@ -14,3 +14,7 @@ void view_reveal_stopped(void);
 void view_clear_selection(void);
 int view_row_count(void);
 void view_on_autoscroll(void (*fn)(bool on));
+bool view_has_selection(void);
+void view_expand_all(bool expanded);
+char *view_selected_row_text(void);
+char *view_selected_details_text(void);

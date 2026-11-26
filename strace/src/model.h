@@ -44,6 +44,9 @@ struct proc {
     uint32_t stopped_seq;
     uint64_t calls;
     uint64_t errors;
+    bool exited;
+    int exit_code;
+    int exit_signal;
     char name[24];
     char exit_text[48];
     struct pstat *st;
@@ -61,6 +64,7 @@ struct model {
     int nprocs;
     uint32_t next_seq;
     uint32_t first_seq;
+    char *command;
 };
 
 extern struct model M;
@@ -80,3 +84,4 @@ bool item_valid(uint32_t seq);
 struct item *item_at(uint32_t seq);
 bool model_active(void);
 int model_roots(int *out, int max);
+const char *model_export_json(const char *path);

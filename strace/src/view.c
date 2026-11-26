@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <stdarg.h>
 #include "view.h"
 #include "model.h"
 
@@ -595,4 +596,133 @@ struct pg_widget *view_stats_new(void)
     stats_w = pg_drawing_new(300, 170, draw_stats, NULL, NULL);
     pg_widget_set_expand(stats_w, true, false);
     return stats_w;
+}
+
+bool view_has_selection(void)
+{
+    return sel >= 0 && sel < nrows;
+}
+
+void view_expand_all(bool expanded)
+{
+    for (int i = 0; i < M.nprocs; i++)
+        if (P[i].used)
+            P[i].expanded = expanded;
+    view_rebuild();
+}
+
+struct sbuf {
+    char *p;
+    size_t n, cap;
+    bool bad;
+};
+
+static void sb_add(struct sbuf *b, const char *fmt, ...)
+{
+    if (b->bad)
+        return;
+    for (;;) {
+        va_list ap;
+        va_start(ap, fmt);
+        int need = vsnprintf(b->p ? b->p + b->n : NULL, b->p ? b->cap - b->n : 0, fmt, ap);
+        va_end(ap);
+        if (need < 0) {
+            b->bad = true;
+            return;
+        }
+        if (b->p && b->n + (size_t)need < b->cap) {
+            b->n += (size_t)need;
+            return;
+        }
+        size_t cap = b->cap ? b->cap * 2 : 256;
+        while (cap <= b->n + (size_t)need)
+            cap *= 2;
+        char *np = realloc(b->p, cap);
+        if (!np) {
+            b->bad = true;
+            return;
+        }
+        b->p = np;
+        b->cap = cap;
+    }
+}
+
+static char *sb_done(struct sbuf *b)
+{
+    if (b->bad) {
+        free(b->p);
+        return NULL;
+    }
+    return b->p;
+}
+
+char *view_selected_row_text(void)
+{
+    if (!view_has_selection())
+        return NULL;
+    struct vrow *vr = &rows[sel];
+    struct proc *p = &P[vr->proc];
+    struct sbuf b = {0};
+    if (vr->kind == VR_PROC) {
+        sb_add(&b, "[%u] %s  %s  %llu calls  %llu errors", p->pid, p->name,
+               p->stopped ? "STOPPED" : p->alive ? "running" : p->exit_text, (unsigned long long)p->calls,
+               (unsigned long long)p->errors);
+    } else if (vr->kind == VR_EXIT) {
+        sb_add(&b, "+++ %s +++", p->exit_text[0] ? p->exit_text : "exited");
+    } else {
+        struct item *it = item_at(vr->seq);
+        if (!it)
+            return NULL;
+        char tmp[24], args[1024], ret[64], dur[32];
+        tl_format_args(&it->rec, args, sizeof(args), true);
+        sb_add(&b, "[%u] %s(%s)", it->rec.pid, tl_sysname(it->rec.nr, tmp, sizeof(tmp)), args);
+        if (it->done) {
+            tl_format_ret(it->rec.nr, it->rec.ret, ret, sizeof(ret));
+            tl_format_duration(it->rec.duration_ns, dur, sizeof(dur));
+            sb_add(&b, " = %s <%s>", ret, dur);
+        } else
+            sb_add(&b, " = ?");
+    }
+    return sb_done(&b);
+}
+
+char *view_selected_details_text(void)
+{
+    if (!view_has_selection())
+        return NULL;
+    struct vrow *vr = &rows[sel];
+    struct proc *p = &P[vr->proc];
+    struct sbuf b = {0};
+    if (vr->kind != VR_SYS) {
+        sb_add(&b, "Process: %u %s\nParent: %u\nState: %s\nSystem calls: %llu calls, %llu failed\n", p->pid, p->name,
+               p->ppid, p->stopped ? "stopped at a breakpoint" : p->alive ? "running" : p->exit_text,
+               (unsigned long long)p->calls, (unsigned long long)p->errors);
+        return sb_done(&b);
+    }
+    struct item *it = item_at(vr->seq);
+    if (!it)
+        return NULL;
+    char tmp[24], dec[1024], ret[64], dur[32];
+    sb_add(&b, "System call: %s (number %u)\n", tl_sysname(it->rec.nr, tmp, sizeof(tmp)), it->rec.nr);
+    sb_add(&b, "Process: %u %s  thread %u  parent %u\n", it->rec.pid, p->name, it->rec.tid, it->rec.ppid);
+    sb_add(&b, "Entered: %llu.%06llu s\n", (unsigned long long)(it->rec.time_ns / 1000000000ULL),
+           (unsigned long long)(it->rec.time_ns % 1000000000ULL / 1000));
+    if (it->done) {
+        tl_format_ret(it->rec.nr, it->rec.ret, ret, sizeof(ret));
+        tl_format_duration(it->rec.duration_ns, dur, sizeof(dur));
+        sb_add(&b, "Result: %s (raw %lld, 0x%llx)\nDuration: %s\n", ret, (long long)it->rec.ret,
+               (unsigned long long)it->rec.ret, dur);
+    } else
+        sb_add(&b, "Result: not finished\n");
+    if (it->rec.flags & (TRACE_REC_STR1 | TRACE_REC_STR2))
+        sb_add(&b, "String: \"%s\"\n", it->rec.str);
+    int n = tl_nargs(it->rec.nr);
+    if (n < 3)
+        n = 3;
+    for (int i = 0; i < n && i < 6; i++) {
+        tl_format_arg(&it->rec, i, dec, sizeof(dec), true);
+        sb_add(&b, "arg%d %s: 0x%llx = %s\n", i + 1, tl_kind_label(tl_argkind(it->rec.nr, i)),
+               (unsigned long long)it->rec.args[i], dec);
+    }
+    return sb_done(&b);
 }

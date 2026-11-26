@@ -25,6 +25,74 @@ DESCRIPTION
        The Statistics tab draws a bar chart of the calls of the selected
        process; the red part of a bar is failed calls.
 
+MENUS
+       The menu bar has five menus. Click a title to open it; while a menu
+       is open, moving the pointer over another title switches to it, Left
+       and Right switch menus, Up, Down and Enter choose an item, and Esc or
+       a click elsewhere closes it. Alt+F, Alt+E, Alt+V, Alt+T and Alt+H
+       open File, Edit, View, Trace and Help. Unavailable items are grey.
+       The toolbar buttons do the same as the matching menu items.
+
+           File     Run command... (focus the command field), Attach to
+                    PID..., Export JSON... (Ctrl+S), Clear, Quit (Ctrl+Q)
+           Edit     Copy selected row, Copy details (to the program's own
+                    clipboard), Focus filter (Ctrl+F)
+           View     Toggle details panel (Ctrl+J), Autoscroll, Expand all,
+                    Collapse all, Statistics
+           Trace    Start, Pause display, Continue (F5), Step (F10),
+                    Detach, Breakpoints...
+           Help     About, man strace (shows this page)
+
+DETAILS PANEL
+       The Details and Statistics panel under the table is collapsed and
+       expanded with the chevron at its left, with Ctrl+J, or from the View
+       menu; clicking a tab also expands it. When it is collapsed the table
+       uses the whole height.
+
+EXPORT
+       File > Export JSON... opens a save dialog with a path field filled
+       in as ~/strace-PID-YYYYmmdd-HHMMSS.json and a folder list: select a
+       file to use its name, double-click or press Enter on a folder to
+       enter it, ".." goes up. If the file exists, Save becomes Overwrite
+       and must be pressed again. The result is shown in the status bar.
+       The file is streamed and has no size limit; it contains all rows
+       still held by the program (at most 50000).
+
+       JSON layout (all strings are escaped, control characters as \u00XX):
+
+           {
+             "tool": "strace", "version": "1.1.0",
+             "exported_at": "2026-11-26T10:00:00Z",
+             "traced": {"command": "ls /etc", "pid": 12},
+             "processes": [
+               {"pid": 12, "parent": 1, "name": "ls", "alive": false,
+                "exit_status": {"code": 0, "signal": 0,
+                                "text": "exited with 0"},
+                "calls": 40, "errors": 2}
+             ],
+             "events": [
+               {"index": 5, "pid": 12, "tid": 12, "syscall_nr": 2,
+                "syscall": "open",
+                "args_raw": ["0x7ffc1000", "0x0", "0x0", "0x0", "0x0", "0x0"],
+                "args_decoded": ["\"/etc\"", "O_RDONLY", "0"],
+                "string": "/etc",
+                "result": {"raw": -2, "text": "-2 ENOENT",
+                           "error": true, "errno": "ENOENT"},
+                "entry_time_ns": 1234567, "duration_ns": 8900}
+             ],
+             "statistics": {
+               "events": 90, "events_exported": 80, "completed_calls": 40,
+               "failed_calls": 2, "dropped_by_kernel": 0,
+               "rows_discarded_by_viewer": 0,
+               "per_process": [{"pid": 12, "syscalls": [
+                  {"syscall_nr": 2, "syscall": "open", "calls": 3,
+                   "errors": 1, "total_ns": 25000}]}],
+               "per_syscall": []
+             }
+           }
+
+       A call that had not finished has "result" and "duration_ns" null.
+
        Toolbar:
            Pause     freeze the display; events are still collected
            Detach    stop tracing, the processes keep running
