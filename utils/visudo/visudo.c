@@ -72,21 +72,22 @@ static int run_editor(const char *path)
         editor = getenv("EDITOR");
     if (!editor || !*editor)
         editor = "vim";
-    char copy[512];
-    snprintf(copy, sizeof(copy), "%s", editor);
-    char *argv[16];
+    char *copy = sudoers_xdup(editor);
+    char **argv = NULL;
     int count = 0;
-    for (char *c = copy; *c && count < 13;) {
+    for (char *c = copy; *c;) {
         while (*c == ' ' || *c == '\t')
             c++;
         if (!*c)
             break;
+        argv = sudoers_xrealloc(argv, sizeof(char *) * (size_t)(count + 1));
         argv[count++] = c;
         while (*c && *c != ' ' && *c != '\t')
             c++;
         if (*c)
             *c++ = 0;
     }
+    argv = sudoers_xrealloc(argv, sizeof(char *) * (size_t)(count + 2));
     argv[count++] = (char *)path;
     argv[count] = NULL;
     pid_t child = fork();
@@ -100,9 +101,10 @@ static int run_editor(const char *path)
         _exit(127);
     }
     int status = 0;
-    if (waitpid(child, &status, 0) < 0)
-        return -1;
-    return status;
+    int waited = waitpid(child, &status, 0);
+    free(argv);
+    free(copy);
+    return waited < 0 ? -1 : status;
 }
 
 static int check_only(const char *path, bool strict, bool quiet)
@@ -177,8 +179,7 @@ int main(int argc, char **argv)
     if (check)
         return check_only(target, strict, quiet);
 
-    char temp[600];
-    snprintf(temp, sizeof(temp), "%s.tmp", target);
+    char *temp = sudoers_format("%s.tmp", target);
     int fd = open(temp, O_WRONLY | O_CREAT | O_EXCL, 0600);
     if (fd < 0) {
         if (errno == EEXIST)
@@ -190,7 +191,7 @@ int main(int argc, char **argv)
     char *original = NULL;
     size_t original_size = 0;
     if (!read_all(target, &original, &original_size)) {
-        original = malloc(1);
+        original = sudoers_xalloc(1);
         original_size = 0;
     }
     if (!write_all(fd, original, original_size)) {
@@ -238,20 +239,19 @@ int main(int argc, char **argv)
         for (;;) {
             fputs("What now? ", stderr);
             fflush(stderr);
-            char answer[16];
-            ssize_t got = read(0, answer, 1);
-            if (got <= 0 || answer[0] == 'x') {
+            char choice = 0;
+            char c;
+            ssize_t got = read(0, &c, 1);
+            if (got > 0) {
+                choice = c;
+                while (c != '\n' && read(0, &c, 1) > 0)
+                    ;
+            }
+            if (got <= 0 || choice == 'x') {
                 unlink(temp);
                 fputc('\n', stderr);
                 return 1;
             }
-            while (answer[0] != '\n') {
-                if (read(0, answer + 1, 1) <= 0)
-                    break;
-                if (answer[1] == '\n')
-                    break;
-            }
-            char choice = answer[0];
             if (choice == 'Q') {
                 chown(temp, 0, 0);
                 chmod(temp, 0440);

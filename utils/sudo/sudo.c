@@ -573,6 +573,21 @@ static int parse_options(int argc, char **argv, struct options *o)
     return 0;
 }
 
+static struct passwd *copy_passwd(const struct passwd *source)
+{
+    struct passwd *copy = sudoers_xalloc(sizeof(*copy));
+    *copy = *source;
+    copy->pw_name = sudoers_xdup(source->pw_name);
+    copy->pw_dir = sudoers_xdup(source->pw_dir ? source->pw_dir : "/");
+    copy->pw_shell = sudoers_xdup(source->pw_shell && *source->pw_shell ? source->pw_shell : "/bin/sh");
+    return copy;
+}
+
+static bool numeric_id(const char *text)
+{
+    return text[0] == '#' && isdigit((unsigned char)text[1]);
+}
+
 int main(int argc, char **argv)
 {
     struct options opt;
@@ -589,24 +604,17 @@ int main(int argc, char **argv)
         fputs("sudo: you do not exist in the passwd database\n", stderr);
         return 1;
     }
-    static struct passwd invoker;
-    static char invoker_name[64], invoker_dir[128], invoker_shell[128];
-    snprintf(invoker_name, sizeof(invoker_name), "%s", found->pw_name);
-    snprintf(invoker_dir, sizeof(invoker_dir), "%s", found->pw_dir ? found->pw_dir : "/");
-    snprintf(invoker_shell, sizeof(invoker_shell), "%s", found->pw_shell ? found->pw_shell : "/bin/sh");
-    invoker = *found;
-    invoker.pw_name = invoker_name;
-    invoker.pw_dir = invoker_dir;
-    invoker.pw_shell = invoker_shell;
+    struct passwd *invoker = copy_passwd(found);
 
+    bool bare = opt.first_command >= argc && !opt.shell && !opt.login && !opt.list && !opt.validate;
     if (opt.remove_all) {
-        timestamp_remove_all(invoker.pw_name);
-        if (opt.first_command >= argc && !opt.shell && !opt.login && !opt.list && !opt.validate)
+        timestamp_remove_all(invoker->pw_name);
+        if (bare)
             return 0;
     }
     if (opt.invalidate) {
-        timestamp_remove(invoker.pw_name);
-        if (opt.first_command >= argc && !opt.shell && !opt.login && !opt.list && !opt.validate)
+        timestamp_remove(invoker->pw_name);
+        if (bare)
             return 0;
     }
     bool has_command = opt.first_command < argc;
@@ -614,61 +622,49 @@ int main(int argc, char **argv)
         usage(stderr);
         return 1;
     }
-    if ((opt.shell || opt.login) && (opt.shell && opt.login)) {
+    if (opt.shell && opt.login) {
         fputs("sudo: you may not specify both the '-i' and '-s' options\n", stderr);
         return 1;
     }
 
-    static struct passwd target;
-    static char target_name[64], target_dir[128], target_shell[128];
-    struct passwd *target_found = NULL;
+    struct passwd *target_found;
     if (opt.user) {
-        target_found = opt.user[0] == '#' && isdigit((unsigned char)opt.user[1])
-                           ? getpwuid((uid_t)atol(opt.user + 1))
-                           : getpwnam(opt.user);
-        if (!target_found && opt.user[0] == '#' && isdigit((unsigned char)opt.user[1])) {
-            static struct passwd synthetic;
-            synthetic.pw_name = (char *)opt.user;
-            synthetic.pw_uid = (uid_t)atol(opt.user + 1);
-            synthetic.pw_gid = synthetic.pw_uid;
-            synthetic.pw_dir = (char *)"/";
-            synthetic.pw_shell = (char *)"/bin/sh";
-            target_found = &synthetic;
-        }
+        target_found = numeric_id(opt.user) ? getpwuid((uid_t)atol(opt.user + 1)) : getpwnam(opt.user);
     } else {
         target_found = getpwuid(0);
     }
-    if (!target_found) {
+    struct passwd *target;
+    if (target_found) {
+        target = copy_passwd(target_found);
+    } else if (opt.user && numeric_id(opt.user)) {
+        struct passwd synthetic;
+        memset(&synthetic, 0, sizeof(synthetic));
+        synthetic.pw_name = (char *)opt.user;
+        synthetic.pw_uid = (uid_t)atol(opt.user + 1);
+        synthetic.pw_gid = synthetic.pw_uid;
+        synthetic.pw_dir = (char *)"/";
+        synthetic.pw_shell = (char *)"/bin/sh";
+        target = copy_passwd(&synthetic);
+    } else {
         fprintf(stderr, "sudo: unknown user: %s\n", opt.user ? opt.user : "root");
         return 1;
     }
-    snprintf(target_name, sizeof(target_name), "%s", target_found->pw_name);
-    snprintf(target_dir, sizeof(target_dir), "%s", target_found->pw_dir ? target_found->pw_dir : "/");
-    snprintf(target_shell, sizeof(target_shell), "%s",
-             target_found->pw_shell && *target_found->pw_shell ? target_found->pw_shell : "/bin/sh");
-    target = *target_found;
-    target.pw_name = target_name;
-    target.pw_dir = target_dir;
-    target.pw_shell = target_shell;
 
-    gid_t target_gid = target.pw_gid;
-    static char group_name[64];
-    const char *request_group = NULL;
+    gid_t target_gid = target->pw_gid;
+    char *request_group = NULL;
     if (opt.group) {
-        struct group *group = opt.group[0] == '#' && isdigit((unsigned char)opt.group[1])
-                                  ? getgrgid((gid_t)atol(opt.group + 1))
-                                  : getgrnam(opt.group);
+        struct group *group = numeric_id(opt.group) ? getgrgid((gid_t)atol(opt.group + 1))
+                                                    : getgrnam(opt.group);
         if (group) {
-            snprintf(group_name, sizeof(group_name), "%s", group->gr_name);
+            request_group = sudoers_xdup(group->gr_name);
             target_gid = group->gr_gid;
-        } else if (opt.group[0] == '#' && isdigit((unsigned char)opt.group[1])) {
-            snprintf(group_name, sizeof(group_name), "%s", opt.group);
+        } else if (numeric_id(opt.group)) {
+            request_group = sudoers_xdup(opt.group);
             target_gid = (gid_t)atol(opt.group + 1);
         } else {
             fprintf(stderr, "sudo: unknown group: %s\n", opt.group);
             return 1;
         }
-        request_group = group_name;
     }
 
     struct sudoers db;
@@ -682,91 +678,84 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    struct sudoers_subject subject = {invoker.pw_name, invoker.pw_uid, invoker.pw_gid};
-    struct sudoers_request request = {target.pw_name, target.pw_uid, request_group,
+    struct sudoers_subject subject = {invoker->pw_name, invoker->pw_uid, invoker->pw_gid};
+    struct sudoers_request request = {target->pw_name, target->pw_uid, request_group,
                                       target_gid, "", ""};
     struct sudoers_settings settings;
     sudoers_settings(&db, &subject, &request, &settings);
 
-    char command_path[1024] = "";
-    char command_line[2048] = "";
-    char arguments[1536] = "";
-    char shell_arguments[1600] = "";
+    char *command_path = NULL;
+    char *command_line = NULL;
+    char *arguments = sudoers_xdup("");
+    char *shell_arguments = sudoers_xdup("");
     char **exec_argv = NULL;
     const char *shell_path = NULL;
     bool found_command = true;
+    bool use_shell = opt.shell || opt.login;
 
-    if (opt.shell || opt.login) {
+    if (use_shell) {
         const char *shell_env = getenv("SHELL");
-        shell_path = opt.login ? target.pw_shell
-                               : (shell_env && shell_env[0] == '/' ? shell_env : target.pw_shell);
-        snprintf(command_path, sizeof(command_path), "%s", shell_path);
-        exec_argv = calloc(4, sizeof(char *));
-        if (!exec_argv)
-            return 1;
+        shell_path = opt.login ? target->pw_shell
+                               : (shell_env && shell_env[0] == '/' ? shell_env : target->pw_shell);
+        command_path = sudoers_xdup(shell_path);
+        exec_argv = sudoers_xalloc(4 * sizeof(char *));
         const char *base = strrchr(shell_path, '/');
         exec_argv[0] = (char *)(base ? base + 1 : shell_path);
         if (has_command) {
-            join_arguments(argv + opt.first_command, argc - opt.first_command, arguments,
-                           sizeof(arguments));
+            free(arguments);
+            arguments = join_arguments(argv + opt.first_command, argc - opt.first_command);
             exec_argv[1] = (char *)"-c";
             exec_argv[2] = arguments;
-            snprintf(shell_arguments, sizeof(shell_arguments), "-c %s", arguments);
-            snprintf(command_line, sizeof(command_line), "%s %s", shell_path, shell_arguments);
+            free(shell_arguments);
+            shell_arguments = sudoers_format("-c %s", arguments);
+            command_line = sudoers_format("%s %s", shell_path, shell_arguments);
         } else {
-            snprintf(command_line, sizeof(command_line), "%s", shell_path);
+            command_line = sudoers_xdup(shell_path);
         }
     } else if (has_command) {
-        found_command = resolve_command(argv[opt.first_command], settings.secure_path ?
-                                        settings.secure_path : getenv("PATH"), command_path,
-                                        sizeof(command_path));
-        join_arguments(argv + opt.first_command + 1, argc - opt.first_command - 1, arguments,
-                       sizeof(arguments));
-        if (arguments[0])
-            snprintf(command_line, sizeof(command_line), "%s %s", command_path, arguments);
-        else
-            snprintf(command_line, sizeof(command_line), "%s", command_path);
-        exec_argv = calloc((size_t)(argc - opt.first_command + 1), sizeof(char *));
-        if (!exec_argv)
-            return 1;
+        found_command = resolve_command(argv[opt.first_command],
+                                        settings.secure_path ? settings.secure_path : getenv("PATH"),
+                                        &command_path);
+        free(arguments);
+        arguments = join_arguments(argv + opt.first_command + 1, argc - opt.first_command - 1);
+        command_line = arguments[0] ? sudoers_format("%s %s", command_path, arguments)
+                                    : sudoers_xdup(command_path);
+        exec_argv = sudoers_xalloc((size_t)(argc - opt.first_command + 1) * sizeof(char *));
         for (int i = opt.first_command; i < argc; i++)
             exec_argv[i - opt.first_command] = argv[i];
+    } else {
+        command_path = sudoers_xdup("");
+        command_line = sudoers_xdup("");
     }
 
     request.command = command_path;
-    request.arguments = (opt.shell || opt.login) ? shell_arguments : arguments;
+    request.arguments = use_shell ? shell_arguments : arguments;
     sudoers_settings(&db, &subject, &request, &settings);
 
     struct sudoers_verdict verdict;
     sudoers_check(&db, &subject, &request, &verdict);
-    bool needs_command_check = has_command || opt.shell || opt.login;
+    bool needs_command_check = !((opt.list || opt.validate) && !has_command && !use_shell);
 
-    if ((opt.list || opt.validate) && !has_command && !opt.shell && !opt.login)
-        needs_command_check = false;
-
-    char host[256];
-    snprintf(host, sizeof(host), "%s", db.hostname[0] ? db.hostname : "localhost");
+    const char *host = db.hostname && db.hostname[0] ? db.hostname : "localhost";
 
     if (needs_command_check && !verdict.allowed) {
         if (!verdict.listed) {
-            fprintf(stderr, "%s is not in the sudoers file.\n", invoker.pw_name);
-            log_event(invoker.pw_name, "user NOT in sudoers ; ", target.pw_name, command_line);
+            fprintf(stderr, "%s is not in the sudoers file.\n", invoker->pw_name);
+            log_event(invoker->pw_name, "user NOT in sudoers ; ", target->pw_name, command_line);
         } else {
             fprintf(stderr, "Sorry, user %s is not allowed to execute '%s' as %s on %s.\n",
-                    invoker.pw_name, command_line, target.pw_name, host);
-            log_event(invoker.pw_name, "command not allowed ; ", target.pw_name, command_line);
+                    invoker->pw_name, command_line, target->pw_name, host);
+            log_event(invoker->pw_name, "command not allowed ; ", target->pw_name, command_line);
         }
         return 1;
     }
-    if (!needs_command_check) {
-        if (!verdict.listed) {
-            if (opt.list)
-                printf("User %s is not allowed to run sudo on %s.\n", invoker.pw_name, host);
-            else
-                fprintf(stderr, "%s is not in the sudoers file.\n", invoker.pw_name);
-            log_event(invoker.pw_name, "user NOT in sudoers ; ", target.pw_name, "");
-            return 1;
-        }
+    if (!needs_command_check && !verdict.listed) {
+        if (opt.list)
+            printf("User %s is not allowed to run sudo on %s.\n", invoker->pw_name, host);
+        else
+            fprintf(stderr, "%s is not in the sudoers file.\n", invoker->pw_name);
+        log_event(invoker->pw_name, "user NOT in sudoers ; ", target->pw_name, "");
+        return 1;
     }
 
     if (opt.preserve_env && !verdict.setenv && needs_command_check) {
@@ -774,14 +763,15 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    const char *auth_user = settings.rootpw ? "root" : settings.targetpw ? target.pw_name
-                                                                          : invoker.pw_name;
+    const char *auth_user = settings.rootpw ? "root" : settings.targetpw ? target->pw_name
+                                                                         : invoker->pw_name;
     bool needs_password = real_uid != 0 || settings.rootpw || settings.targetpw;
     if (needs_command_check && verdict.passwd == 2)
         needs_password = false;
     if (!needs_command_check && sudoers_user_has_nopasswd(&db, &subject))
         needs_password = false;
-    if (needs_password && !opt.invalidate && timestamp_valid(invoker.pw_name, settings.timestamp_timeout))
+    bool fresh = !opt.invalidate && timestamp_valid(invoker->pw_name, settings.timestamp_timeout);
+    if (needs_password && fresh)
         needs_password = false;
     if (needs_password) {
         if (opt.non_interactive) {
@@ -789,49 +779,47 @@ int main(int argc, char **argv)
             return 1;
         }
         if (authenticate(auth_user, settings.passwd_tries) != 0) {
-            log_event(invoker.pw_name, "incorrect password attempts ; ", target.pw_name,
+            log_event(invoker->pw_name, "incorrect password attempts ; ", target->pw_name,
                       command_line);
             return 1;
         }
-        timestamp_update(invoker.pw_name);
-    } else if (real_uid != 0 && settings.timestamp_timeout > 0 &&
-               timestamp_valid(invoker.pw_name, settings.timestamp_timeout)) {
-        timestamp_update(invoker.pw_name);
+        timestamp_update(invoker->pw_name);
+    } else if (real_uid != 0 && fresh) {
+        timestamp_update(invoker->pw_name);
     }
 
-    if (opt.validate && !has_command && !opt.shell && !opt.login)
+    if (opt.validate && !has_command && !use_shell)
         return 0;
 
     if (opt.list) {
-        printf("Matching Defaults entries for %s on %s:\n    ", invoker.pw_name, host);
+        printf("Matching Defaults entries for %s on %s:\n    ", invoker->pw_name, host);
         print_defaults(&settings);
-        printf("\nUser %s may run the following commands on %s:\n", invoker.pw_name, host);
-        if (has_command) {
+        printf("\nUser %s may run the following commands on %s:\n", invoker->pw_name, host);
+        if (has_command)
             printf("%s\n", command_line);
-        } else {
+        else
             sudoers_list_rules(&db, &subject, stdout);
-        }
         return 0;
     }
 
-    if (!found_command && !(opt.shell || opt.login)) {
+    if (!found_command && !use_shell) {
         fprintf(stderr, "sudo: %s: command not found\n", argv[opt.first_command]);
         return 1;
     }
 
-    const char *run_shell = shell_path ? shell_path : target.pw_shell;
-    char **env = build_environment(&settings, opt.preserve_env, &target, &invoker, command_line,
+    const char *run_shell = shell_path ? shell_path : target->pw_shell;
+    char **env = build_environment(&settings, opt.preserve_env, target, invoker, command_line,
                                    run_shell);
 
-    log_event(invoker.pw_name, "", target.pw_name, command_line);
+    log_event(invoker->pw_name, "", target->pw_name, command_line);
 
     if (setresgid(target_gid, target_gid, target_gid) != 0 ||
-        setresuid(target.pw_uid, target.pw_uid, target.pw_uid) != 0) {
+        setresuid(target->pw_uid, target->pw_uid, target->pw_uid) != 0) {
         fputs("sudo: unable to change to runas uid or gid\n", stderr);
         return 1;
     }
-    if (opt.login && chdir(target.pw_dir) != 0) {
-        fprintf(stderr, "sudo: unable to change directory to %s: %s\n", target.pw_dir,
+    if (opt.login && chdir(target->pw_dir) != 0) {
+        fprintf(stderr, "sudo: unable to change directory to %s: %s\n", target->pw_dir,
                 strerror(errno));
         return 1;
     }
