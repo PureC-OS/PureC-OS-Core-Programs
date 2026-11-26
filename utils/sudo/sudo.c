@@ -565,7 +565,7 @@ int main(int argc, char **argv)
 {
     struct options opt;
     parse_options(argc, argv, &opt);
-    openlog("sudo", 0, LOG_AUTH);
+    openlog("sudo", 0, LOG_USER);
     if (geteuid() != 0) {
         fputs("sudo: effective uid is not 0, is /usr/bin/sudo on a filesystem with the 'nosuid' option set?\n",
               stderr);
