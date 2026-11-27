@@ -72,7 +72,7 @@ GENERAL_CPP_SOURCES :=
 UTILS := ls cat cp mv rm mkdir rmdir touch chmod stat find tree du df install realpath basename dirname \
 	grep head tail wc sort uniq cut tr tee cmp diff nl rev seq yes xargs xxd \
 	echo pwd env uname whoami id hostname date uptime sleep true false kill ps free which \
-	clear reboot ping man less help cd ip host ss chvt tty fdisk iwxctl blkid mkinitcpio sync ldd ldconfig ln readlink
+	clear reboot ping man less help cd ip host ss chvt tty fdisk iwxctl blkid mkinitcpio sync ldd ldconfig ln readlink unshare nsenter
 UTIL_LIB_OBJECTS := $(OBJ_DIR)/utils/lib/common.o $(OBJ_DIR)/utils/lib/pager.o $(OBJ_DIR)/utils/lib/fileops.o
 UTIL_OBJECTS := $(foreach u,$(UTILS),$(OBJ_DIR)/utils/$(u)/$(u).o) $(UTIL_LIB_OBJECTS) $(OBJ_DIR)/utils/trace/trace.o
 TRACELIB_OBJ := $(OBJ_DIR)/tracelib/sysnames.o

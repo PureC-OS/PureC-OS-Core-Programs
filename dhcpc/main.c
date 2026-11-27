@@ -138,15 +138,8 @@ static bool send_msg(uint8_t type, uint32_t ciaddr, uint32_t requested, uint32_t
     if (server)
         at = opt32(p, at, 54, server);
     char host[64] = "";
-    FILE *f = fopen("/etc/hostname", "r");
-    if (f) {
-        if (fgets(host, sizeof(host), f)) {
-            char *nl = strchr(host, '\n');
-            if (nl)
-                *nl = 0;
-        }
-        fclose(f);
-    }
+    if (gethostname(host, sizeof(host)) != 0)
+        host[0] = 0;
     if (host[0])
         at = opt(p, at, 12, host, (uint8_t)strlen(host));
     if (type != RELEASE) {

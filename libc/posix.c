@@ -10,6 +10,7 @@
 #include "include/hosted/time.h"
 #include "include/hosted/utime.h"
 #include "include/hosted/sys/utsname.h"
+#include "include/hosted/sched.h"
 #include "include/hosted/unistd.h"
 #include "include/hosted/termios.h"
 #include <stdbool.h>
@@ -305,32 +306,112 @@ int uname(struct utsname *name)
         errno = EFAULT;
         return -1;
     }
-    memset(name, 0, sizeof(*name));
-    strcpy(name->sysname, "PureC");
-    strcpy(name->nodename, "purec");
-    strcpy(name->release, "2.1.0");
-    int32_t rfd = pc_file_open("/sys/kernel/release");
-    if (rfd >= 0)
+    int64_t result = pc_syscall(SYS_UNAME, (uint64_t)(uintptr_t)name, 0, 0);
+    if (result < 0)
     {
-        char rel[sizeof(name->release)];
-        int32_t rn = pc_file_read(rfd, rel, sizeof(rel) - 1);
-        pc_file_close(rfd);
-        while (rn > 0 && (rel[rn - 1] == '\n' || rel[rn - 1] == ' '))
-            rn--;
-        if (rn > 0)
-        {
-            rel[rn] = 0;
-            strcpy(name->release, rel);
-        }
-    }
-    strcpy(name->version, "#1 SMP PureC OS");
-    strcpy(name->machine, "x86_64");
-    char host[64];
-    if (pc_getenv("HOSTNAME", host, sizeof(host)) > 0)
-    {
-        strncpy(name->nodename, host, sizeof(name->nodename) - 1);
+        errno = (int)-result;
+        return -1;
     }
     return 0;
+}
+
+static int uts_set(long number, const char *name, size_t length)
+{
+    if (!name && length)
+    {
+        errno = EFAULT;
+        return -1;
+    }
+    int64_t result = pc_syscall((uint64_t)number, (uint64_t)(uintptr_t)name,
+                                (uint64_t)length, 0);
+    if (result < 0)
+    {
+        errno = (int)-result;
+        return -1;
+    }
+    return 0;
+}
+
+int sethostname(const char *name, size_t length)
+{
+    return uts_set(SYS_SETHOSTNAME, name, length);
+}
+
+int setdomainname(const char *name, size_t length)
+{
+    return uts_set(SYS_SETDOMAINNAME, name, length);
+}
+
+int gethostname(char *name, size_t length)
+{
+    struct utsname uts;
+    if (uname(&uts) != 0)
+        return -1;
+    size_t size = strlen(uts.nodename);
+    if (size >= length)
+    {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    memcpy(name, uts.nodename, size + 1);
+    return 0;
+}
+
+int getdomainname(char *name, size_t length)
+{
+    struct utsname uts;
+    if (uname(&uts) != 0)
+        return -1;
+    size_t size = strlen(uts.domainname);
+    if (size >= length)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    memcpy(name, uts.domainname, size + 1);
+    return 0;
+}
+
+int unshare(int flags)
+{
+    int64_t result = pc_syscall(SYS_UNSHARE, (uint64_t)(uint32_t)flags, 0, 0);
+    if (result < 0)
+    {
+        errno = (int)-result;
+        return -1;
+    }
+    return 0;
+}
+
+int setns(int fd, int nstype)
+{
+    int64_t result = pc_syscall(SYS_SETNS, (uint64_t)(int64_t)fd,
+                                (uint64_t)(uint32_t)nstype, 0);
+    if (result < 0)
+    {
+        errno = (int)-result;
+        return -1;
+    }
+    return 0;
+}
+
+int clone(int (*function)(void *), void *stack, int flags, void *argument, ...)
+{
+    (void)stack;
+    if (!function)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    int64_t result = pc_syscall(SYS_CLONE, (uint64_t)(uint32_t)flags, 0, 0);
+    if (result < 0)
+    {
+        errno = (int)-result;
+        return -1;
+    }
+    if (result == 0)
+        _exit(function(argument));
+    return (int)result;
 }
 
 static char passwd_name[64];

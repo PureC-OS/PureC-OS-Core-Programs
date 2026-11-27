@@ -317,18 +317,6 @@ size_t strxfrm(char *destination, const char *source, size_t count)
     return length;
 }
 
-int gethostname(char *name, size_t length)
-{
-    const char *host = "purec";
-    if (length < strlen(host) + 1)
-    {
-        errno = ENAMETOOLONG;
-        return -1;
-    }
-    strcpy(name, host);
-    return 0;
-}
-
 long sysconf(int name)
 {
     switch (name)

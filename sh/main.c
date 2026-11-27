@@ -2883,7 +2883,12 @@ static void expand_prompt(const char *ps1, char *out, size_t cap) {
             p++;
             switch (*p) {
             case 'u': ins = var_get("USER"); if (!ins) ins = getuid() == 0 ? "root" : "user"; break;
-            case 'h': case 'H': ins = "purec"; break;
+            case 'h': case 'H': {
+                if (gethostname(tmp, sizeof(tmp)) != 0) strcpy(tmp, "purec");
+                if (*p == 'h') { char *dot = strchr(tmp, '.'); if (dot) *dot = 0; }
+                ins = tmp;
+                break;
+            }
             case 'w': case 'W': {
                 if (!getcwd(tmp, sizeof(tmp))) strcpy(tmp, "?");
                 const char *home = var_get("HOME");

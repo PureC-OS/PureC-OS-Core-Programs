@@ -27,6 +27,18 @@ extern "C"
 #define CPU_CLR(cpu, set) ((set)->bits[(cpu) / 64] &= ~(1UL << ((cpu) % 64)))
 #define CPU_ISSET(cpu, set) (((set)->bits[(cpu) / 64] >> ((cpu) % 64)) & 1UL)
 
+#define CLONE_NEWTIME 0x00000080
+#define CLONE_NEWNS 0x00020000
+#define CLONE_NEWCGROUP 0x02000000
+#define CLONE_NEWUTS 0x04000000
+#define CLONE_NEWIPC 0x08000000
+#define CLONE_NEWUSER 0x10000000
+#define CLONE_NEWPID 0x20000000
+#define CLONE_NEWNET 0x40000000
+
+    int unshare(int flags);
+    int setns(int fd, int nstype);
+    int clone(int (*function)(void *), void *stack, int flags, void *argument, ...);
     int sched_yield(void);
     int sched_getaffinity(int pid, unsigned long size, cpu_set_t *set);
     int sched_setaffinity(int pid, unsigned long size, const cpu_set_t *set);

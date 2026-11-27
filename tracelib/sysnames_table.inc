@@ -229,5 +229,11 @@ static const struct tl_sysname tl_sysnames[] = {
     {227, "setresgid"},
     {228, "getresuid"},
     {229, "getresgid"},
-    {230, "nr"},
+    {230, "unshare"},
+    {231, "setns"},
+    {232, "clone"},
+    {233, "uname"},
+    {234, "sethostname"},
+    {235, "setdomainname"},
+    {236, "nr"},
 };
