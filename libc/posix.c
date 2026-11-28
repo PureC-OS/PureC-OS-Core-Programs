@@ -10,6 +10,8 @@
 #include "include/hosted/time.h"
 #include "include/hosted/utime.h"
 #include "include/hosted/sys/utsname.h"
+#include "include/hosted/sys/mount.h"
+#include "include/purec/sysasm.h"
 #include "include/hosted/sched.h"
 #include "include/hosted/unistd.h"
 #include "include/hosted/termios.h"
@@ -393,6 +395,39 @@ int setns(int fd, int nstype)
         return -1;
     }
     return 0;
+}
+
+int mount(const char *source, const char *target, const char *filesystemtype,
+          unsigned long mountflags, const void *data)
+{
+    int64_t result = __pc_syscall6(SYS_MOUNT, (uint64_t)(uintptr_t)source,
+                                   (uint64_t)(uintptr_t)target,
+                                   (uint64_t)(uintptr_t)filesystemtype,
+                                   (uint64_t)mountflags,
+                                   (uint64_t)(uintptr_t)data, 0);
+    if (result < 0)
+    {
+        errno = (int)-result;
+        return -1;
+    }
+    return 0;
+}
+
+int umount2(const char *target, int flags)
+{
+    int64_t result = pc_syscall(SYS_UMOUNT2, (uint64_t)(uintptr_t)target,
+                                (uint64_t)(uint32_t)flags, 0);
+    if (result < 0)
+    {
+        errno = (int)-result;
+        return -1;
+    }
+    return 0;
+}
+
+int umount(const char *target)
+{
+    return umount2(target, 0);
 }
 
 int clone(int (*function)(void *), void *stack, int flags, void *argument, ...)

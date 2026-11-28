@@ -10,7 +10,7 @@ struct kind {
 
 static const struct kind kinds[] = {
     {'u', "uts", CLONE_NEWUTS, true},
-    {'m', "mount", CLONE_NEWNS, false},
+    {'m', "mount", CLONE_NEWNS, true},
     {'p', "pid", CLONE_NEWPID, false},
     {'i', "ipc", CLONE_NEWIPC, false},
     {'n', "net", CLONE_NEWNET, false},
@@ -49,7 +49,7 @@ static int enter(long pid, const struct kind *kind)
     if (!kind->supported)
         return util_err("%s namespace is not supported yet", kind->name);
     char path[64];
-    snprintf(path, sizeof(path), "/proc/%ld/ns/%s", pid, kind->name);
+    snprintf(path, sizeof(path), "/proc/%ld/ns/%s", pid, kind->flag == CLONE_NEWNS ? "mnt" : kind->name);
     int fd = open(path, O_RDONLY);
     if (fd < 0)
         return util_err("cannot open %s: %s", path, strerror(errno));
